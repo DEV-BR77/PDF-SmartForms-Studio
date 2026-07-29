@@ -22,3 +22,7 @@
 - lokale Templateverwaltung mit Vertrauensstatus
 - sicherer ZIP/PSFS-Import mit Pfad-, Typ- und Größenprüfung
 - optionale SHA-256-Prüfsummenprüfung ohne stilles Überschreiben
+- schreibgeschützte AcroForm- und Textanalyse für PDFs
+- visuelle PDF-Vorschau mit Zoom und Seitenwechsel
+- grüne, gelbe und rote Feldrahmen mit zusätzlichen Symbol- und Textstatus
+- lokale Feldzuordnung mit nachvollziehbarer Konfidenz

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QKeyEvent
 from PyQt6.QtWidgets import (
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -23,6 +26,7 @@ from pdf_smartforms.infrastructure.paths import AppPaths
 from pdf_smartforms.profiles.repository import ProfileRepository
 from pdf_smartforms.templates.repository import TemplateRepository
 from pdf_smartforms.ui.about_dialog import AboutDialog
+from pdf_smartforms.ui.pdf_analysis_dialog import PdfAnalysisDialog
 from pdf_smartforms.ui.profile_manager import ProfileManagerDialog
 from pdf_smartforms.ui.template_manager import TemplateManagerDialog
 
@@ -90,7 +94,7 @@ class MainWindow(QMainWindow):
         self.resize(980, 640)
         self.setMinimumSize(760, 520)
         page = WelcomePage()
-        page.own_pdf_requested.connect(lambda: self._not_yet_available("PDF-Import", "PSFS-040"))
+        page.own_pdf_requested.connect(self._select_pdf)
         page.package_requested.connect(lambda: self._not_yet_available("Paketimport", "PSFS-086"))
         self.setCentralWidget(page)
         self._build_menu()
@@ -124,6 +128,20 @@ class MainWindow(QMainWindow):
 
     def _show_templates(self) -> None:
         TemplateManagerDialog(self.template_repository, self).exec()
+
+    def _select_pdf(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "PDF auswählen",
+            "",
+            "PDF-Dokumente (*.pdf)",
+        )
+        if not filename:
+            return
+        try:
+            PdfAnalysisDialog(Path(filename), self).exec()
+        except ValueError as error:
+            QMessageBox.critical(self, "PDF konnte nicht analysiert werden", str(error))
 
     def _show_about(self) -> None:
         AboutDialog(self).exec()
