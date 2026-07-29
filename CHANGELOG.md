@@ -18,3 +18,7 @@
 - Kalenderauswahl für Geburtsdaten und Schutz vor versehentlichem Jahr 1900
 - zwei erziehungsberechtigte Personen und optionale Nachnamenübernahme
 - gemeinsames Ortsfeld für Anschrift und späteren Unterschriftsort
+- versioniertes Template- und Feldmodell mit PDF-Koordinaten
+- lokale Templateverwaltung mit Vertrauensstatus
+- sicherer ZIP/PSFS-Import mit Pfad-, Typ- und Größenprüfung
+- optionale SHA-256-Prüfsummenprüfung ohne stilles Überschreiben

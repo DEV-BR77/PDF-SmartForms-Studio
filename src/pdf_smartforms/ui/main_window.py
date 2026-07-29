@@ -21,8 +21,10 @@ from PyQt6.QtWidgets import (
 from pdf_smartforms.build_info import APP_NAME, __version__
 from pdf_smartforms.infrastructure.paths import AppPaths
 from pdf_smartforms.profiles.repository import ProfileRepository
+from pdf_smartforms.templates.repository import TemplateRepository
 from pdf_smartforms.ui.about_dialog import AboutDialog
 from pdf_smartforms.ui.profile_manager import ProfileManagerDialog
+from pdf_smartforms.ui.template_manager import TemplateManagerDialog
 
 
 class WelcomePage(QWidget):
@@ -83,6 +85,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.paths = paths
         self.profile_repository = ProfileRepository(paths.profiles)
+        self.template_repository = TemplateRepository(paths.templates)
         self.setWindowTitle(f"{APP_NAME} · {__version__}")
         self.resize(980, 640)
         self.setMinimumSize(760, 520)
@@ -104,6 +107,12 @@ class MainWindow(QMainWindow):
         manage_profiles.setShortcut("Ctrl+P")
         manage_profiles.triggered.connect(self._show_profiles)
         profile_menu.addAction(manage_profiles)
+        template_menu = QMenu("&Templates", menu_bar)
+        menu_bar.addMenu(template_menu)
+        manage_templates = QAction("Templates verwalten", template_menu)
+        manage_templates.setShortcut("Ctrl+T")
+        manage_templates.triggered.connect(self._show_templates)
+        template_menu.addAction(manage_templates)
         help_menu = QMenu("&Hilfe", menu_bar)
         menu_bar.addMenu(help_menu)
         about_action = QAction(f"Über {APP_NAME}", help_menu)
@@ -112,6 +121,9 @@ class MainWindow(QMainWindow):
 
     def _show_profiles(self) -> None:
         ProfileManagerDialog(self.profile_repository, self).exec()
+
+    def _show_templates(self) -> None:
+        TemplateManagerDialog(self.template_repository, self).exec()
 
     def _show_about(self) -> None:
         AboutDialog(self).exec()
