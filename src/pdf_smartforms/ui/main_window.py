@@ -31,6 +31,7 @@ from pdf_smartforms.ui.about_dialog import AboutDialog
 from pdf_smartforms.ui.pdf_analysis_dialog import PdfAnalysisDialog
 from pdf_smartforms.ui.profile_manager import ProfileManagerDialog
 from pdf_smartforms.ui.signature_manager import SignatureManagerDialog
+from pdf_smartforms.ui.template_designer import TemplateDesignerDialog
 from pdf_smartforms.ui.template_manager import TemplateManagerDialog
 
 
@@ -122,6 +123,10 @@ class MainWindow(QMainWindow):
         manage_templates.setShortcut("Ctrl+T")
         manage_templates.triggered.connect(self._show_templates)
         template_menu.addAction(manage_templates)
+        create_template = QAction("Neues Template aus PDF", template_menu)
+        create_template.setShortcut("Ctrl+Shift+T")
+        create_template.triggered.connect(self._create_template)
+        template_menu.addAction(create_template)
         signature_menu = QMenu("&Unterschriften", menu_bar)
         menu_bar.addMenu(signature_menu)
         manage_signatures = QAction("Unterschriften verwalten", signature_menu)
@@ -139,6 +144,19 @@ class MainWindow(QMainWindow):
 
     def _show_templates(self) -> None:
         TemplateManagerDialog(self.template_repository, self).exec()
+
+    def _create_template(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "PDF für neues Template auswählen",
+            "",
+            "PDF-Dokumente (*.pdf)",
+        )
+        if filename:
+            try:
+                TemplateDesignerDialog(Path(filename), self.template_repository, self).exec()
+            except ValueError as error:
+                QMessageBox.critical(self, "Template-Designer konnte nicht starten", str(error))
 
     def _show_signatures(self) -> None:
         SignatureManagerDialog(self.signature_repository, self).exec()

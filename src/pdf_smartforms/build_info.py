@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 APP_NAME = "PDF SmartForms Studio"
 EDITION = "Community"
-__version__ = "0.6.0-alpha.1"
+__version__ = "0.7.0-alpha.1"
 REPOSITORY_URL = "https://github.com/DEV-BR77/PDF-SmartForms-Studio"
 COPYRIGHT = "Copyright © Björn Radke"
 
