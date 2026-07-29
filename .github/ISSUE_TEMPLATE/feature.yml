@@ -1,0 +1,23 @@
+name: Funktion
+description: Neue Funktion vorschlagen
+title: "[Feature] "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes: {label: Welches Problem soll gelöst werden?}
+    validations: {required: true}
+  - type: textarea
+    id: outcome
+    attributes: {label: Gewünschtes Ergebnis}
+    validations: {required: true}
+  - type: dropdown
+    id: area
+    attributes:
+      label: Bereich
+      options: [Profile, Templates, PDF-Analyse, Feldlexikon, Unterschriften, E-Mail, Plugins, Datenschutz, Sonstiges]
+    validations: {required: true}
+  - type: textarea
+    id: acceptance
+    attributes: {label: Mögliche Akzeptanzkriterien}
+

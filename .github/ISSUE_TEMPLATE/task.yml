@@ -1,0 +1,25 @@
+name: Entwicklungsaufgabe
+description: Umsetzungsfertige Aufgabe
+title: "[Task] "
+labels: ["task"]
+body:
+  - type: input
+    id: epic
+    attributes: {label: Epic/Backlog-ID}
+    validations: {required: true}
+  - type: textarea
+    id: scope
+    attributes: {label: Umfang}
+    validations: {required: true}
+  - type: textarea
+    id: acceptance
+    attributes: {label: Akzeptanzkriterien}
+    validations: {required: true}
+  - type: textarea
+    id: tests
+    attributes: {label: Tests}
+    validations: {required: true}
+  - type: textarea
+    id: security
+    attributes: {label: Datenschutz/Sicherheit}
+
