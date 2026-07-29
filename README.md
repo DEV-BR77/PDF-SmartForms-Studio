@@ -20,6 +20,30 @@ Lokale, modulare Desktop-Anwendung zum Analysieren, Zuordnen, Ausfüllen, Signie
 4. [CONTRIBUTING.md](CONTRIBUTING.md) und die Definition of Done beachten.
 5. Gegen den Meilenstein `0.1.0-alpha` implementieren.
 
+## Entwicklung starten
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+pdf-smartforms
+```
+
+Qualitätsprüfung:
+
+```powershell
+ruff check .
+black --check .
+mypy
+pytest
+```
+
+Windows-Build:
+
+```powershell
+.\build_windows.ps1
+```
+
 ## Repositories
 
 - Anwendung: `DEV-BR77/PDF-SmartForms-Studio`
@@ -34,4 +58,3 @@ Verbindliche gemeinsame Standards liegen im BR Development Framework. Projektspe
 ## Nutzung und Recht
 
 Copyright © Björn Radke. Der geplante Lizenztyp ist **Source Available**. Kostenlose Nutzung ist für private Zwecke, Bildung sowie Sport- und gemeinnützige Organisationen vorgesehen. Kommerzielle Nutzung benötigt eine separate Vereinbarung. Vor einer öffentlichen Veröffentlichung ist der endgültige Lizenztext juristisch zu prüfen.
-
