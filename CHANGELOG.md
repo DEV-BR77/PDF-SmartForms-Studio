@@ -40,3 +40,8 @@
 - Feldtyp, Datenquelle und Pflichtstatus bearbeiten
 - Tastatur-Feinsteuerung sowie Undo/Redo für Anlegen und Löschen
 - selbstvalidierende `.psfstemplate`-Pakete mit PDF und SHA-256-Prüfsummen
+- lokale Vorschläge für Dokumenttitel, Empfänger und Betreff
+- PDF-Arbeitskopien mit eingebetteten Unterschriftenbildern
+- bestätigtes Drucken über den Windows-Standarddrucker
+- lokale `.eml`-Entwürfe mit Sicherheitszusammenfassung statt automatischem Versand
+- Verteilerlisten sowie Austauschpakete mit leerem Profil, Anleitung und Repository-Link

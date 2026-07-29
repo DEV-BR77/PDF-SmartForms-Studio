@@ -1,0 +1,40 @@
+"""Local title, recipient and subject suggestions."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any
+
+import pymupdf
+
+from pdf_smartforms.domain.distribution import CommunicationSuggestion
+
+_EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+
+
+def suggest_communication(path: Path) -> CommunicationSuggestion:
+    """Read metadata and visible text locally; never sends anything."""
+    with pymupdf.open(path) as document:  # type: ignore[no-untyped-call]
+        metadata: dict[str, Any] = document.metadata or {}
+        title = str(metadata.get("title") or "").strip()
+        first_page_text = document.load_page(0).get_text("text") if document.page_count else ""
+        if not title:
+            title = _first_heading(first_page_text) or path.stem
+        all_text = "\n".join(
+            document.load_page(index).get_text("text") for index in range(document.page_count)
+        )
+    recipients = tuple(sorted({match.casefold() for match in _EMAIL.findall(all_text)}))
+    return CommunicationSuggestion(
+        title=title,
+        subject=f"Ausgefülltes Formular: {title}",
+        recipients=recipients,
+    )
+
+
+def _first_heading(text: str) -> str:
+    for line in text.splitlines():
+        candidate = " ".join(line.split()).strip()
+        if 4 <= len(candidate) <= 120 and not _EMAIL.fullmatch(candidate):
+            return candidate
+    return ""

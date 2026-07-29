@@ -1,0 +1,1 @@
+"""Safe document distribution helpers."""

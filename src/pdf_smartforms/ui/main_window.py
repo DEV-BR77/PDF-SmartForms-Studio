@@ -22,12 +22,18 @@ from PyQt6.QtWidgets import (
 )
 
 from pdf_smartforms.build_info import APP_NAME, __version__
+from pdf_smartforms.distribution.exchange_package import (
+    UnsafeExchangePackage,
+    import_exchange_package,
+)
+from pdf_smartforms.distribution.repository import DistributionListRepository
 from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.infrastructure.paths import AppPaths
 from pdf_smartforms.profiles.repository import ProfileRepository
 from pdf_smartforms.signatures.repository import SignatureRepository
 from pdf_smartforms.templates.repository import TemplateRepository
 from pdf_smartforms.ui.about_dialog import AboutDialog
+from pdf_smartforms.ui.distribution_manager import DistributionManagerDialog
 from pdf_smartforms.ui.pdf_analysis_dialog import PdfAnalysisDialog
 from pdf_smartforms.ui.profile_manager import ProfileManagerDialog
 from pdf_smartforms.ui.signature_manager import SignatureManagerDialog
@@ -96,12 +102,13 @@ class MainWindow(QMainWindow):
         self.template_repository = TemplateRepository(paths.templates)
         self.dictionary_repository = FieldDictionaryRepository(paths.field_dictionary)
         self.signature_repository = SignatureRepository(paths.signatures)
+        self.distribution_repository = DistributionListRepository(paths.distribution_lists)
         self.setWindowTitle(f"{APP_NAME} · {__version__}")
         self.resize(980, 640)
         self.setMinimumSize(760, 520)
         page = WelcomePage()
         page.own_pdf_requested.connect(self._select_pdf)
-        page.package_requested.connect(lambda: self._not_yet_available("Paketimport", "PSFS-086"))
+        page.package_requested.connect(self._import_received_package)
         self.setCentralWidget(page)
         self._build_menu()
         status_bar = QStatusBar(self)
@@ -133,6 +140,11 @@ class MainWindow(QMainWindow):
         manage_signatures.setShortcut("Ctrl+U")
         manage_signatures.triggered.connect(self._show_signatures)
         signature_menu.addAction(manage_signatures)
+        distribution_menu = QMenu("&Verteilen", menu_bar)
+        menu_bar.addMenu(distribution_menu)
+        manage_distribution = QAction("Verteilerlisten und Austauschpakete", distribution_menu)
+        manage_distribution.triggered.connect(self._show_distribution)
+        distribution_menu.addAction(manage_distribution)
         help_menu = QMenu("&Hilfe", menu_bar)
         menu_bar.addMenu(help_menu)
         about_action = QAction(f"Über {APP_NAME}", help_menu)
@@ -161,6 +173,9 @@ class MainWindow(QMainWindow):
     def _show_signatures(self) -> None:
         SignatureManagerDialog(self.signature_repository, self).exec()
 
+    def _show_distribution(self) -> None:
+        DistributionManagerDialog(self.distribution_repository, self).exec()
+
     def _select_pdf(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
@@ -179,6 +194,37 @@ class MainWindow(QMainWindow):
             ).exec()
         except ValueError as error:
             QMessageBox.critical(self, "PDF konnte nicht analysiert werden", str(error))
+
+    def _import_received_package(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Erhaltenes Formularpaket auswählen",
+            "",
+            "PDF SmartForms Paket (*.psfspackage *.zip)",
+        )
+        if not filename:
+            return
+        try:
+            imported = import_exchange_package(
+                Path(filename), self.paths.generated_documents / "received-packages"
+            )
+        except (OSError, UnsafeExchangePackage, ValueError) as error:
+            QMessageBox.critical(self, "Paketimport blockiert", str(error))
+            return
+        pdfs = list(imported.glob("*.pdf"))
+        QMessageBox.information(
+            self,
+            "Paket sicher importiert",
+            "Prüfsummen und Inhalte wurden geprüft. Das enthaltene Profil ist leer "
+            "und kann mit eigenen Angaben ergänzt werden.",
+        )
+        if len(pdfs) == 1:
+            PdfAnalysisDialog(
+                pdfs[0],
+                self.dictionary_repository,
+                self.signature_repository,
+                self,
+            ).exec()
 
     def _show_about(self) -> None:
         AboutDialog(self).exec()

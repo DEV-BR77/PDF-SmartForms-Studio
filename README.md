@@ -78,6 +78,12 @@ Pfeiltasten fein verschoben und einer Datenquelle sowie einem Feldtyp
 zugeordnet. Das Ergebnis wird als geprüftes `.psfstemplate`-Paket gespeichert
 und lokal installiert.
 
+`0.8.0-alpha` ergänzt Speichern, Drucken und E-Mail-Entwürfe. Titel,
+Empfängeradressen und Betreff werden ausschließlich lokal vorgeschlagen und
+müssen vor Verwendung geprüft werden. Verteilerlisten bleiben lokal;
+Austauschpakete enthalten bewusst ein leeres Profil, keine Unterschrift und
+eine kurze Anleitung mit Link zum offiziellen Repository.
+
 ## Repositories
 
 - Anwendung: `DEV-BR77/PDF-SmartForms-Studio`

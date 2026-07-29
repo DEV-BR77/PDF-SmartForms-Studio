@@ -17,6 +17,7 @@ class AppPaths:
     signatures: Path
     templates: Path
     field_dictionary: Path
+    distribution_lists: Path
     generated_documents: Path
     backups: Path
     logs: Path
@@ -33,6 +34,7 @@ def create_app_paths(root: Path | None = None) -> AppPaths:
         signatures=data_root / "signatures",
         templates=data_root / "templates",
         field_dictionary=data_root / "field-dictionary",
+        distribution_lists=data_root / "distribution-lists",
         generated_documents=data_root / "generated-documents",
         backups=data_root / "backups",
         logs=data_root / "logs",
