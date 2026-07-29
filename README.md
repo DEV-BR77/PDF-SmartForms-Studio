@@ -55,6 +55,11 @@ verwalten** oder `Strg+T` erreichbar. Importiert werden `.psfstemplate`- oder
 ZIP-Pakete nach vollständiger Sicherheitsprüfung. Bestehende Versionen werden
 nicht still überschrieben.
 
+Mit `0.4.0-alpha` öffnet **Eigenes PDF bearbeiten** die lokale PDF-Analyse.
+AcroForm-Felder und Beschriftungen flacher PDFs erscheinen in einer Vorschau:
+grün/✓ für zugeordnet, gelb/⚠ für unsicher und rot/✕ für fehlend. Die Rahmen
+gehören nur zur Vorschau und werden nicht in das Original geschrieben.
+
 ## Repositories
 
 - Anwendung: `DEV-BR77/PDF-SmartForms-Studio`
