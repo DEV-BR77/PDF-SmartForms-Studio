@@ -20,7 +20,9 @@ from PyQt6.QtWidgets import (
 
 from pdf_smartforms.build_info import APP_NAME, __version__
 from pdf_smartforms.infrastructure.paths import AppPaths
+from pdf_smartforms.profiles.repository import ProfileRepository
 from pdf_smartforms.ui.about_dialog import AboutDialog
+from pdf_smartforms.ui.profile_manager import ProfileManagerDialog
 
 
 class WelcomePage(QWidget):
@@ -80,6 +82,7 @@ class MainWindow(QMainWindow):
     def __init__(self, paths: AppPaths) -> None:
         super().__init__()
         self.paths = paths
+        self.profile_repository = ProfileRepository(paths.profiles)
         self.setWindowTitle(f"{APP_NAME} · {__version__}")
         self.resize(980, 640)
         self.setMinimumSize(760, 520)
@@ -95,11 +98,20 @@ class MainWindow(QMainWindow):
     def _build_menu(self) -> None:
         menu_bar = QMenuBar(self)
         self.setMenuBar(menu_bar)
+        profile_menu = QMenu("&Profile", menu_bar)
+        menu_bar.addMenu(profile_menu)
+        manage_profiles = QAction("Profile verwalten", profile_menu)
+        manage_profiles.setShortcut("Ctrl+P")
+        manage_profiles.triggered.connect(self._show_profiles)
+        profile_menu.addAction(manage_profiles)
         help_menu = QMenu("&Hilfe", menu_bar)
         menu_bar.addMenu(help_menu)
         about_action = QAction(f"Über {APP_NAME}", help_menu)
         help_menu.addAction(about_action)
         about_action.triggered.connect(self._show_about)
+
+    def _show_profiles(self) -> None:
+        ProfileManagerDialog(self.profile_repository, self).exec()
 
     def _show_about(self) -> None:
         AboutDialog(self).exec()

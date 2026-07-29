@@ -13,3 +13,8 @@
 - datenschutzfreundliches, begrenztes Logging mit Maskierung
 - About-Dialog mit Version, Edition, Build und Commit
 - Tests, Architekturregel, CI und Windows-Build-Prototyp
+- flexible lokale Profile mit Kern- und Zusatzfeldern
+- Profilübersicht sowie Anlegen, Bearbeiten und Löschen mit Sicherheitsabfrage
+- Kalenderauswahl für Geburtsdaten und Schutz vor versehentlichem Jahr 1900
+- zwei erziehungsberechtigte Personen und optionale Nachnamenübernahme
+- gemeinsames Ortsfeld für Anschrift und späteren Unterschriftsort

@@ -44,6 +44,12 @@ Windows-Build:
 .\build_windows.ps1
 ```
 
+## Aktueller Entwicklungsstand
+
+Die Profilverwaltung aus `0.2.0-alpha` ist über **Profile → Profile verwalten**
+oder `Strg+P` erreichbar. Sie unterstützt zwei erziehungsberechtigte Personen,
+Kalenderauswahl, flexible Zusatzfelder und lokales JSON.
+
 ## Repositories
 
 - Anwendung: `DEV-BR77/PDF-SmartForms-Studio`
