@@ -45,6 +45,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+warn_unused_ignores = false
 packages = ["pdf_smartforms"]
 
 [[tool.mypy.overrides]]
