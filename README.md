@@ -84,6 +84,15 @@ müssen vor Verwendung geprüft werden. Verteilerlisten bleiben lokal;
 Austauschpakete enthalten bewusst ein leeres Profil, keine Unterschrift und
 eine kurze Anleitung mit Link zum offiziellen Repository.
 
+`0.9.0-beta` ergänzt die verpflichtende Sicherheitsvorschau vor Speichern,
+Drucken und E-Mail-Entwürfen. Unter **Daten → Datensicherung und
+Wiederherstellung** lassen sich lokale, prüfsummengeschützte Sicherungen
+erstellen und vor dem Import vollständig prüfen. Bestehende Dateien werden
+nicht still überschrieben; unmittelbar vor der Wiederherstellung entsteht ein
+Sicherungspunkt. Verwaiste Arbeitsverzeichnisse werden beim Start bereinigt.
+Das Plugin-Grundgerüst liest ausschließlich validierte Metadaten und führt
+keinen fremden Code aus.
+
 ## Repositories
 
 - Anwendung: `DEV-BR77/PDF-SmartForms-Studio`

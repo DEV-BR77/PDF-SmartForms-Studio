@@ -23,6 +23,7 @@ class AppPaths:
     logs: Path
     settings: Path
     temporary: Path
+    plugins: Path
 
 
 def create_app_paths(root: Path | None = None) -> AppPaths:
@@ -40,6 +41,7 @@ def create_app_paths(root: Path | None = None) -> AppPaths:
         logs=data_root / "logs",
         settings=data_root / "settings",
         temporary=data_root / "temporary",
+        plugins=data_root / "plugins",
     )
     for descriptor in fields(paths):
         path = getattr(paths, descriptor.name)
