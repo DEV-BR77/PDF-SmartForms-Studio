@@ -2,7 +2,9 @@
 
 Lokale, modulare Desktop-Anwendung zum Analysieren, Zuordnen, Ausfüllen, Signieren, Prüfen und Verteilen von PDF-Formularen.
 
-> Status: Produkt- und Architekturgrundlage abgeschlossen; Implementierung startet mit `0.1.0-alpha`.
+> Status: `1.0.0-rc.1` – privater Release Candidate für die Community-Version.
+
+![PDF SmartForms Studio](docs/screenshots/01-startseite.png)
 
 ## Leitgedanken
 
@@ -18,7 +20,11 @@ Lokale, modulare Desktop-Anwendung zum Analysieren, Zuordnen, Ausfüllen, Signie
 2. [Architektur](docs/architecture/architecture.md) und [ADRs](docs/adr/README.md) prüfen.
 3. Eine Aufgabe aus [BACKLOG.md](BACKLOG.md) wählen.
 4. [CONTRIBUTING.md](CONTRIBUTING.md) und die Definition of Done beachten.
-5. Gegen den Meilenstein `0.1.0-alpha` implementieren.
+5. Gegen den aktuellen Meilenstein implementieren.
+
+Für Anwender: [Benutzerhandbuch](docs/user-guide/README.md) ·
+[Installation](docs/user-guide/installation.md) ·
+[Schnellstart](docs/user-guide/quickstart.md)
 
 ## Entwicklung starten
 
@@ -92,6 +98,12 @@ nicht still überschrieben; unmittelbar vor der Wiederherstellung entsteht ein
 Sicherungspunkt. Verwaiste Arbeitsverzeichnisse werden beim Start bereinigt.
 Das Plugin-Grundgerüst liest ausschließlich validierte Metadaten und führt
 keinen fremden Code aus.
+
+`1.0.0-rc.1` ergänzt das vollständige Benutzerhandbuch, geprüfte Screenshots,
+ein eigenes App-Icon und einen reproduzierbaren Windows-Release-Build. Das
+Releasepaket enthält Buildinformationen, eine CycloneDX-SBOM und
+SHA-256-Prüfsummen. Die stabile Veröffentlichung bleibt privat, bis Lizenztext
+und Codesignatur abschließend geklärt sind.
 
 ## Repositories
 

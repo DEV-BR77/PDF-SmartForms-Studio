@@ -80,3 +80,11 @@
 - SBOM, Prüfsummen und Releasebericht
 - keine offenen P0/P1-Fehler
 
+### 1.0.0-rc.1 – privater Release Candidate
+
+- vollständiges deutschsprachiges Benutzerhandbuch
+- visuell geprüfte Screenshots und eigenes App-Icon
+- Windows-ZIP mit Buildinformationen
+- CycloneDX-SBOM und SHA-256-Prüfsummen
+- Security-, Privacy-, Test- und Freigabebericht
+- keine öffentliche Stable-Freigabe vor Lizenzprüfung und Codesignaturentscheidung
