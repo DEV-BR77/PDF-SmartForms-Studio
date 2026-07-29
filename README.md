@@ -60,6 +60,11 @@ AcroForm-Felder und Beschriftungen flacher PDFs erscheinen in einer Vorschau:
 grün/✓ für zugeordnet, gelb/⚠ für unsicher und rot/✕ für fehlend. Die Rahmen
 gehören nur zur Vorschau und werden nicht in das Original geschrieben.
 
+Ab `0.5.0-alpha` können erkannte Felder direkt manuell zugeordnet werden.
+Optional lernt das lokale Feldlexikon die bestätigte Bezeichnung für künftige
+Formulare. JSON-Import und -Export enthalten ausschließlich Begriffe und
+Zuordnungen – niemals Namen, Adressen oder andere Profilwerte.
+
 ## Repositories
 
 - Anwendung: `DEV-BR77/PDF-SmartForms-Studio`

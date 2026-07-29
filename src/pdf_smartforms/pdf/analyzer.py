@@ -2,83 +2,31 @@
 
 from __future__ import annotations
 
-import re
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
 import pymupdf
 
 from pdf_smartforms.domain.detection import AnalysisResult, DetectedField, MatchStatus
+from pdf_smartforms.domain.field_dictionary import FieldDictionary, normalize_label
 from pdf_smartforms.domain.templates import Rect, TemplateFieldType
 
 MAX_PDF_SIZE = 100 * 1024 * 1024
 MAX_PAGES = 250
-
-FIELD_ALIASES: dict[str, tuple[str, ...]] = {
-    "participant.first_name": (
-        "participant first name",
-        "vorname kind",
-        "vorname schüler",
-        "vorname teilnehmer",
-        "vorname",
-    ),
-    "participant.last_name": (
-        "participant last name",
-        "nachname kind",
-        "nachname schüler",
-        "familienname",
-        "nachname",
-    ),
-    "participant.birth_date": ("geburtsdatum", "geboren am"),
-    "address.street": ("straße", "strasse", "anschrift"),
-    "address.postal_code": ("postleitzahl", "plz"),
-    "address.city": ("wohnort", "ort"),
-    "contact.phone": ("telefonnummer", "telefon", "mobil"),
-    "contact.email": ("e-mail", "email", "mailadresse"),
-    "guardian.1.first_name": (
-        "vorname erziehungsberechtigte person",
-        "vorname sorgeberechtigte person",
-    ),
-    "guardian.1.last_name": (
-        "nachname erziehungsberechtigte person",
-        "nachname sorgeberechtigte person",
-    ),
-    "signature.date": ("unterschriftsdatum", "datum"),
-    "signature.place": ("ort der unterschrift",),
-}
-
-_NORMALIZE = re.compile(r"[^a-z0-9äöüß]+")
 
 
 class PdfAnalysisError(ValueError):
     """Raised when a PDF cannot be inspected safely."""
 
 
-def normalize_label(value: str) -> str:
-    return _NORMALIZE.sub(" ", value.casefold()).strip()
-
-
-def match_label(label: str) -> tuple[str | None, MatchStatus, float]:
+def match_label(
+    label: str, dictionary: FieldDictionary | None = None
+) -> tuple[str | None, MatchStatus, float]:
     """Map a label to a known profile source without cloud services."""
-    normalized = normalize_label(label)
-    if not normalized:
-        return None, MatchStatus.MISSING, 0.0
-    for source, aliases in FIELD_ALIASES.items():
-        if normalized in aliases:
-            return source, MatchStatus.MAPPED, 1.0
-    best_source: str | None = None
-    best_score = 0.0
-    for source, aliases in FIELD_ALIASES.items():
-        score = max(SequenceMatcher(None, normalized, alias).ratio() for alias in aliases)
-        if score > best_score:
-            best_source, best_score = source, score
-    if best_score >= 0.72:
-        return best_source, MatchStatus.UNCERTAIN, round(best_score, 2)
-    return None, MatchStatus.MISSING, round(best_score, 2)
+    return (dictionary or FieldDictionary.with_seed_data()).match(label)
 
 
-def analyze_pdf(path: Path) -> AnalysisResult:
+def analyze_pdf(path: Path, dictionary: FieldDictionary | None = None) -> AnalysisResult:
     """Inspect fields and text without executing actions or modifying the file."""
     if path.suffix.casefold() != ".pdf":
         raise PdfAnalysisError("Die ausgewählte Datei ist kein PDF.")
@@ -95,13 +43,14 @@ def analyze_pdf(path: Path) -> AnalysisResult:
             raise PdfAnalysisError("Passwortgeschützte PDFs werden nicht umgangen.")
         if document.page_count > MAX_PAGES:
             raise PdfAnalysisError("PDF überschreitet die unterstützte Seitenzahl.")
+        active_dictionary = dictionary or FieldDictionary.with_seed_data()
         fields: list[DetectedField] = []
         for page_number in range(document.page_count):
             page: Any = document.load_page(page_number)
-            widget_fields = _analyze_widgets(page, page_number)
+            widget_fields = _analyze_widgets(page, page_number, active_dictionary)
             fields.extend(widget_fields)
             if not widget_fields:
-                fields.extend(_analyze_flat_page(page, page_number))
+                fields.extend(_analyze_flat_page(page, page_number, active_dictionary))
         metadata: dict[str, Any] = document.metadata or {}
         title = str(metadata.get("title") or "").strip() or path.stem
         warnings = (
@@ -120,7 +69,9 @@ def render_page(path: Path, page_number: int, scale: float = 1.5) -> tuple[bytes
         return pixmap.samples, pixmap.width, pixmap.height
 
 
-def _analyze_widgets(page: Any, page_number: int) -> list[DetectedField]:
+def _analyze_widgets(
+    page: Any, page_number: int, dictionary: FieldDictionary
+) -> list[DetectedField]:
     fields: list[DetectedField] = []
     widgets = page.widgets()
     if widgets is None:
@@ -128,7 +79,7 @@ def _analyze_widgets(page: Any, page_number: int) -> list[DetectedField]:
     for index, widget in enumerate(widgets):
         label = str(widget.field_label or widget.field_name or f"Feld {index + 1}")
         match_value = str(widget.field_label or widget.field_name or "").replace("_", " ")
-        source, status, confidence = match_label(match_value)
+        source, status, confidence = match_label(match_value, dictionary)
         rect = widget.rect
         fields.append(
             DetectedField(
@@ -146,11 +97,15 @@ def _analyze_widgets(page: Any, page_number: int) -> list[DetectedField]:
     return fields
 
 
-def _analyze_flat_page(page: Any, page_number: int) -> list[DetectedField]:
+def _analyze_flat_page(
+    page: Any, page_number: int, dictionary: FieldDictionary
+) -> list[DetectedField]:
     fields: list[DetectedField] = []
     seen: set[tuple[int, int]] = set()
     aliases = sorted(
-        {a for values in FIELD_ALIASES.values() for a in values}, key=len, reverse=True
+        {alias for values in dictionary.entries.values() for alias in values},
+        key=len,
+        reverse=True,
     )
     for alias in aliases:
         for occurrence in page.search_for(alias):
@@ -158,7 +113,7 @@ def _analyze_flat_page(page: Any, page_number: int) -> list[DetectedField]:
             if position in seen:
                 continue
             seen.add(position)
-            source, status, confidence = match_label(alias)
+            source, status, confidence = match_label(alias, dictionary)
             x0 = min(occurrence.x1 + 8, page.rect.width - 80)
             x1 = max(x0 + 72, page.rect.width - 36)
             y0 = max(0, occurrence.y0 - 3)
@@ -183,7 +138,7 @@ def _analyze_flat_page(page: Any, page_number: int) -> list[DetectedField]:
         label = text.rstrip(":")
         if any(normalize_label(label) == normalize_label(item.label) for item in fields):
             continue
-        source, status, confidence = match_label(label)
+        source, status, confidence = match_label(label, dictionary)
         x0 = min(float(word[2]) + 8, page.rect.width - 80)
         x1 = max(x0 + 72, page.rect.width - 36)
         fields.append(

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QImage, QPen, QPixmap
 from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QGraphicsPixmapItem,
     QGraphicsRectItem,
     QGraphicsScene,
@@ -24,7 +28,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from pdf_smartforms.domain.detection import DetectedField, MatchStatus
+from pdf_smartforms.domain.detection import AnalysisResult, DetectedField, MatchStatus
+from pdf_smartforms.domain.field_dictionary import SOURCE_LABELS, AliasConflict
+from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.pdf.analyzer import analyze_pdf, render_page
 
 _COLORS = {
@@ -39,10 +45,16 @@ class PdfAnalysisDialog(QDialog):
 
     SCALE = 1.5
 
-    def __init__(self, pdf_path: Path, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        pdf_path: Path,
+        dictionary_repository: FieldDictionaryRepository,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.pdf_path = pdf_path
-        self.analysis = analyze_pdf(pdf_path)
+        self.dictionary_repository = dictionary_repository
+        self.analysis = analyze_pdf(pdf_path, dictionary_repository.load())
         self.current_page = 0
         self.overlay_items: dict[str, QGraphicsRectItem] = {}
         self.setWindowTitle(f"PDF analysieren · {self.analysis.title}")
@@ -99,6 +111,26 @@ class PdfAnalysisDialog(QDialog):
         self.field_list = QListWidget()
         self.field_list.currentItemChanged.connect(self._focus_selected_field)
         side_layout.addWidget(self.field_list)
+        side_layout.addWidget(QLabel("Manuelle Zuordnung"))
+        self.source_combo = QComboBox()
+        for source, label in sorted(SOURCE_LABELS.items(), key=lambda item: item[1]):
+            self.source_combo.addItem(label, source)
+        side_layout.addWidget(self.source_combo)
+        self.learn_alias = QCheckBox("Diese Zuordnung künftig lokal erkennen")
+        self.learn_alias.setChecked(True)
+        side_layout.addWidget(self.learn_alias)
+        apply_mapping = QPushButton("Zuordnung übernehmen")
+        apply_mapping.setObjectName("primary")
+        apply_mapping.clicked.connect(self._apply_manual_mapping)
+        side_layout.addWidget(apply_mapping)
+        dictionary_actions = QHBoxLayout()
+        import_dictionary = QPushButton("Lexikon importieren")
+        import_dictionary.clicked.connect(self._import_dictionary)
+        export_dictionary = QPushButton("Lexikon exportieren")
+        export_dictionary.clicked.connect(self._export_dictionary)
+        dictionary_actions.addWidget(import_dictionary)
+        dictionary_actions.addWidget(export_dictionary)
+        side_layout.addLayout(dictionary_actions)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         side_layout.addWidget(self.summary)
@@ -110,6 +142,7 @@ class PdfAnalysisDialog(QDialog):
         layout.addWidget(buttons)
 
     def _populate_field_list(self) -> None:
+        self.field_list.clear()
         for field in self.analysis.fields:
             item = QListWidgetItem(
                 f"{field.status_label} · Seite {field.page + 1}\n"
@@ -172,12 +205,96 @@ class PdfAnalysisDialog(QDialog):
         field = self._field_by_id(str(current.data(Qt.ItemDataRole.UserRole)))
         if field is None:
             return
+        if field.source:
+            source_index = self.source_combo.findData(field.source)
+            if source_index >= 0:
+                self.source_combo.setCurrentIndex(source_index)
         if field.page != self.current_page:
             self._show_page(field.page)
         overlay = self.overlay_items.get(field.id)
         if overlay is not None:
             self.view.centerOn(overlay)
             overlay.setPen(QPen(_COLORS[field.status], 6))
+
+    def _selected_field(self) -> DetectedField | None:
+        item = self.field_list.currentItem()
+        if item is None:
+            return None
+        return self._field_by_id(str(item.data(Qt.ItemDataRole.UserRole)))
+
+    def _apply_manual_mapping(self) -> None:
+        field = self._selected_field()
+        source = self.source_combo.currentData()
+        if field is None or not isinstance(source, str):
+            QMessageBox.information(
+                self, "Feld auswählen", "Bitte zuerst ein erkanntes Feld auswählen."
+            )
+            return
+        if self.learn_alias.isChecked():
+            try:
+                self.dictionary_repository.learn(field.label, source)
+            except AliasConflict as error:
+                QMessageBox.warning(self, "Lexikon-Konflikt", str(error))
+                return
+        updated = replace(
+            field,
+            source=source,
+            status=MatchStatus.MAPPED,
+            confidence=1.0,
+            origin="Manuell bestätigt",
+        )
+        fields = tuple(updated if item.id == field.id else item for item in self.analysis.fields)
+        self.analysis = AnalysisResult(
+            self.analysis.title,
+            self.analysis.page_count,
+            fields,
+            self.analysis.warnings,
+        )
+        self._populate_field_list()
+        self._show_page(self.current_page)
+
+    def _import_dictionary(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Feldlexikon importieren", "", "JSON (*.json)"
+        )
+        if not filename:
+            return
+        try:
+            report = self.dictionary_repository.import_from(Path(filename))
+        except (OSError, ValueError) as error:
+            QMessageBox.critical(self, "Import fehlgeschlagen", str(error))
+            return
+        conflict_text = (
+            "\n\nKonflikte wurden nicht überschrieben:\n" + "\n".join(report.conflicts)
+            if report.conflicts
+            else ""
+        )
+        QMessageBox.information(
+            self,
+            "Lexikon importiert",
+            f"Neu: {report.added}\nBereits vorhanden: {report.duplicates}"
+            f"\nKonflikte: {len(report.conflicts)}{conflict_text}",
+        )
+
+    def _export_dictionary(self) -> None:
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Feldlexikon exportieren",
+            "field-dictionary.de.json",
+            "JSON (*.json)",
+        )
+        if not filename:
+            return
+        try:
+            self.dictionary_repository.export_to(Path(filename))
+        except OSError as error:
+            QMessageBox.critical(self, "Export fehlgeschlagen", str(error))
+            return
+        QMessageBox.information(
+            self,
+            "Lexikon exportiert",
+            "Der Export enthält ausschließlich Feldbegriffe und Zuordnungen, keine Profilwerte.",
+        )
 
     def _previous_page(self) -> None:
         if self.current_page > 0:
