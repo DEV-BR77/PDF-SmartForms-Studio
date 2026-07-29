@@ -72,6 +72,12 @@ PDF-Vorschau lassen sie sich mit der Maus verschieben und mit dem Mausrad
 skalieren. Es handelt sich um sichtbare Bildunterschriften, nicht um
 qualifizierte elektronische Signaturen.
 
+Mit `0.7.0-alpha` öffnet **Templates → Neues Template aus PDF** den visuellen
+Designer. Felder werden auf der PDF-Seite mit der Maus aufgezogen, per
+Pfeiltasten fein verschoben und einer Datenquelle sowie einem Feldtyp
+zugeordnet. Das Ergebnis wird als geprüftes `.psfstemplate`-Paket gespeichert
+und lokal installiert.
+
 ## Repositories
 
 - Anwendung: `DEV-BR77/PDF-SmartForms-Studio`

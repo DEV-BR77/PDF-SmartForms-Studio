@@ -35,3 +35,8 @@
 - automatisches Zuschneiden, Kontrastverbesserung und optionale Weißtransparenz
 - bewegliche und per Mausrad skalierbare Unterschriftenbilder in der PDF-Vorschau
 - deutliche Abgrenzung von Bildunterschrift und qualifizierter elektronischer Signatur
+- visueller, mehrseitiger Template-Designer
+- Felder per Maus aufziehen, auswählen und verschieben
+- Feldtyp, Datenquelle und Pflichtstatus bearbeiten
+- Tastatur-Feinsteuerung sowie Undo/Redo für Anlegen und Löschen
+- selbstvalidierende `.psfstemplate`-Pakete mit PDF und SHA-256-Prüfsummen
