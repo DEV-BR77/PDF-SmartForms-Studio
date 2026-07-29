@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QImage, QPen, QPixmap
+from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtGui import QColor, QDesktopServices, QImage, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -21,6 +23,7 @@ from PyQt6.QtWidgets import (
     QGraphicsView,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -30,7 +33,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from pdf_smartforms.distribution.document_exporter import export_work_copy
+from pdf_smartforms.distribution.email_draft import create_email_draft
+from pdf_smartforms.distribution.metadata import suggest_communication
 from pdf_smartforms.domain.detection import AnalysisResult, DetectedField, MatchStatus
+from pdf_smartforms.domain.distribution import PlacedSignature
 from pdf_smartforms.domain.field_dictionary import SOURCE_LABELS, AliasConflict
 from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.pdf.analyzer import analyze_pdf, render_page
@@ -104,6 +111,7 @@ class PdfAnalysisDialog(QDialog):
         self.dictionary_repository = dictionary_repository
         self.signature_repository = signature_repository
         self.analysis = analyze_pdf(pdf_path, dictionary_repository.load())
+        self.communication = suggest_communication(pdf_path)
         self.signature_placements: list[SignaturePlacementState] = []
         self.current_page = 0
         self.overlay_items: dict[str, QGraphicsRectItem] = {}
@@ -194,6 +202,23 @@ class PdfAnalysisDialog(QDialog):
         )
         signature_hint.setWordWrap(True)
         side_layout.addWidget(signature_hint)
+        side_layout.addWidget(QLabel("Ausgabe und E-Mail-Entwurf"))
+        self.recipient_edit = QLineEdit(", ".join(self.communication.recipients))
+        self.recipient_edit.setPlaceholderText("Empfänger prüfen")
+        self.subject_edit = QLineEdit(self.communication.subject)
+        side_layout.addWidget(self.recipient_edit)
+        side_layout.addWidget(self.subject_edit)
+        output_actions = QHBoxLayout()
+        save_pdf = QPushButton("Speichern")
+        save_pdf.clicked.connect(self._save_work_copy)
+        print_pdf = QPushButton("Drucken")
+        print_pdf.clicked.connect(self._print_work_copy)
+        email_draft = QPushButton("E-Mail-Entwurf")
+        email_draft.clicked.connect(self._create_email_draft)
+        output_actions.addWidget(save_pdf)
+        output_actions.addWidget(print_pdf)
+        output_actions.addWidget(email_draft)
+        side_layout.addLayout(output_actions)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         side_layout.addWidget(self.summary)
@@ -409,6 +434,120 @@ class PdfAnalysisDialog(QDialog):
             if pixmap.isNull():
                 continue
             self.scene.addItem(SignatureOverlayItem(pixmap, placement))
+
+    def _placed_signatures(self) -> list[PlacedSignature]:
+        assets = {asset.id: asset for asset in self.signature_repository.list()}
+        output: list[PlacedSignature] = []
+        for placement in self.signature_placements:
+            asset = assets.get(placement.asset_id)
+            if asset is None:
+                continue
+            width = asset.width * placement.scale / self.SCALE
+            height = asset.height * placement.scale / self.SCALE
+            x0 = placement.x / self.SCALE
+            y0 = placement.y / self.SCALE
+            output.append(
+                PlacedSignature(
+                    str(self.signature_repository.image_path(asset)),
+                    placement.page,
+                    x0,
+                    y0,
+                    x0 + width,
+                    y0 + height,
+                )
+            )
+        return output
+
+    def _export_to_selected_path(self) -> Path | None:
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "PDF-Arbeitskopie speichern",
+            f"{self.communication.title}.pdf",
+            "PDF-Dokumente (*.pdf)",
+        )
+        if not filename:
+            return None
+        try:
+            return export_work_copy(self.pdf_path, Path(filename), self._placed_signatures())
+        except (OSError, ValueError) as error:
+            QMessageBox.critical(self, "PDF konnte nicht gespeichert werden", str(error))
+            return None
+
+    def _save_work_copy(self) -> None:
+        target = self._export_to_selected_path()
+        if target:
+            QMessageBox.information(self, "PDF gespeichert", f"Arbeitskopie gespeichert:\n{target}")
+
+    def _print_work_copy(self) -> None:
+        target = self._export_to_selected_path()
+        if target is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Druck bestätigen",
+            f"Diese Datei wird an den Windows-Standarddrucker übergeben:\n{target}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        startfile = getattr(os, "startfile", None)
+        if startfile is None:
+            QMessageBox.warning(
+                self,
+                "Drucken nicht verfügbar",
+                "Diese Funktion wird derzeit unter Windows unterstützt.",
+            )
+            return
+        try:
+            startfile(str(target), "print")
+        except OSError as error:
+            QMessageBox.critical(self, "Drucken fehlgeschlagen", str(error))
+
+    def _create_email_draft(self) -> None:
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "E-Mail-Entwurf speichern",
+            f"{self.communication.title}.eml",
+            "E-Mail-Entwurf (*.eml)",
+        )
+        if not filename:
+            return
+        target = Path(filename)
+        pdf_target = target.with_suffix(".pdf")
+        recipients = [
+            item.strip() for item in re.split(r"[,;]", self.recipient_edit.text()) if item.strip()
+        ]
+        subject = self.subject_edit.text().strip()
+        answer = QMessageBox.question(
+            self,
+            "E-Mail-Entwurf prüfen",
+            f"Empfänger: {', '.join(recipients) or '[leer]'}\n"
+            f"Betreff: {subject or '[leer]'}\n"
+            f"Anhang: {pdf_target.name}\n\n"
+            "Es wird nur ein lokaler Entwurf erstellt. Es erfolgt kein Versand.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            export_work_copy(self.pdf_path, pdf_target, self._placed_signatures())
+            create_email_draft(
+                target,
+                recipients=recipients,
+                subject=subject,
+                body=(
+                    "Guten Tag,\n\nanbei erhalten Sie das ausgefüllte Formular. "
+                    "Bitte prüfen Sie den Anhang.\n\n"
+                    "Erstellt mit PDF SmartForms Studio."
+                ),
+                attachments=[pdf_target],
+            )
+        except (OSError, ValueError) as error:
+            QMessageBox.critical(self, "Entwurf konnte nicht erstellt werden", str(error))
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
     def _previous_page(self) -> None:
         if self.current_page > 0:
