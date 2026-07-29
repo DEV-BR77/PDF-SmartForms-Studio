@@ -39,9 +39,11 @@ from pdf_smartforms.distribution.metadata import suggest_communication
 from pdf_smartforms.domain.detection import AnalysisResult, DetectedField, MatchStatus
 from pdf_smartforms.domain.distribution import PlacedSignature
 from pdf_smartforms.domain.field_dictionary import SOURCE_LABELS, AliasConflict
+from pdf_smartforms.domain.safety import SafetyReview
 from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.pdf.analyzer import analyze_pdf, render_page
 from pdf_smartforms.signatures.repository import SignatureRepository
+from pdf_smartforms.ui.safety_review_dialog import confirm_safety_review
 
 _COLORS = {
     MatchStatus.MAPPED: QColor("#1f9d55"),
@@ -458,6 +460,26 @@ class PdfAnalysisDialog(QDialog):
             )
         return output
 
+    def _safety_review(
+        self,
+        action: str,
+        *,
+        recipients: tuple[str, ...] = (),
+        subject: str = "",
+        attachments: tuple[str, ...] = (),
+    ) -> SafetyReview:
+        mapped = sum(field.status == MatchStatus.MAPPED for field in self.analysis.fields)
+        return SafetyReview(
+            action=action,
+            document_name=self.pdf_path.name,
+            mapped_fields=mapped,
+            unresolved_fields=len(self.analysis.fields) - mapped,
+            signatures=len(self._placed_signatures()),
+            recipients=recipients,
+            subject=subject,
+            attachments=attachments,
+        )
+
     def _export_to_selected_path(self) -> Path | None:
         filename, _ = QFileDialog.getSaveFileName(
             self,
@@ -474,22 +496,17 @@ class PdfAnalysisDialog(QDialog):
             return None
 
     def _save_work_copy(self) -> None:
+        if not confirm_safety_review(self._safety_review("PDF speichern"), self):
+            return
         target = self._export_to_selected_path()
         if target:
             QMessageBox.information(self, "PDF gespeichert", f"Arbeitskopie gespeichert:\n{target}")
 
     def _print_work_copy(self) -> None:
+        if not confirm_safety_review(self._safety_review("PDF drucken"), self):
+            return
         target = self._export_to_selected_path()
         if target is None:
-            return
-        answer = QMessageBox.question(
-            self,
-            "Druck bestätigen",
-            f"Diese Datei wird an den Windows-Standarddrucker übergeben:\n{target}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
             return
         startfile = getattr(os, "startfile", None)
         if startfile is None:
@@ -519,17 +536,15 @@ class PdfAnalysisDialog(QDialog):
             item.strip() for item in re.split(r"[,;]", self.recipient_edit.text()) if item.strip()
         ]
         subject = self.subject_edit.text().strip()
-        answer = QMessageBox.question(
+        if not confirm_safety_review(
+            self._safety_review(
+                "E-Mail-Entwurf",
+                recipients=tuple(recipients),
+                subject=subject,
+                attachments=(pdf_target.name,),
+            ),
             self,
-            "E-Mail-Entwurf prüfen",
-            f"Empfänger: {', '.join(recipients) or '[leer]'}\n"
-            f"Betreff: {subject or '[leer]'}\n"
-            f"Anhang: {pdf_target.name}\n\n"
-            "Es wird nur ein lokaler Entwurf erstellt. Es erfolgt kein Versand.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        ):
             return
         try:
             export_work_copy(self.pdf_path, pdf_target, self._placed_signatures())

@@ -33,6 +33,7 @@ from pdf_smartforms.profiles.repository import ProfileRepository
 from pdf_smartforms.signatures.repository import SignatureRepository
 from pdf_smartforms.templates.repository import TemplateRepository
 from pdf_smartforms.ui.about_dialog import AboutDialog
+from pdf_smartforms.ui.backup_manager import BackupManagerDialog
 from pdf_smartforms.ui.distribution_manager import DistributionManagerDialog
 from pdf_smartforms.ui.pdf_analysis_dialog import PdfAnalysisDialog
 from pdf_smartforms.ui.profile_manager import ProfileManagerDialog
@@ -145,6 +146,12 @@ class MainWindow(QMainWindow):
         manage_distribution = QAction("Verteilerlisten und Austauschpakete", distribution_menu)
         manage_distribution.triggered.connect(self._show_distribution)
         distribution_menu.addAction(manage_distribution)
+        data_menu = QMenu("&Daten", menu_bar)
+        menu_bar.addMenu(data_menu)
+        backup_action = QAction("Datensicherung und Wiederherstellung", data_menu)
+        backup_action.setShortcut("Ctrl+Shift+B")
+        backup_action.triggered.connect(self._show_backup_manager)
+        data_menu.addAction(backup_action)
         help_menu = QMenu("&Hilfe", menu_bar)
         menu_bar.addMenu(help_menu)
         about_action = QAction(f"Über {APP_NAME}", help_menu)
@@ -175,6 +182,9 @@ class MainWindow(QMainWindow):
 
     def _show_distribution(self) -> None:
         DistributionManagerDialog(self.distribution_repository, self).exec()
+
+    def _show_backup_manager(self) -> None:
+        BackupManagerDialog(self.paths, self).exec()
 
     def _select_pdf(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(

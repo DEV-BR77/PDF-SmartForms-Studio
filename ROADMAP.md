@@ -10,10 +10,9 @@
 | 0.6.0-alpha | Planned | Unterschriftenverwaltung |
 | 0.7.0-alpha | Planned | visueller Template-Designer |
 | 0.8.0-alpha | Planned | E-Mail-Assistent und Verteilerlisten |
-| 0.9.0-beta | Planned | Backup, Sicherheit, Stabilisierung |
+| 0.9.0-beta | In development | Backup, Sicherheit, Stabilisierung |
 | 1.0.0 | Planned | Community Release |
 | 2.0.0 | Future | Business Edition, Branding, Plugins |
 | 3.0.0 | Future | Professional, OCR und Integrationen |
 
 Details und Freigabekriterien stehen in `docs/releases/`.
-

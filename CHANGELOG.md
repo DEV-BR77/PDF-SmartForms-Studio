@@ -43,5 +43,10 @@
 - lokale Vorschläge für Dokumenttitel, Empfänger und Betreff
 - PDF-Arbeitskopien mit eingebetteten Unterschriftenbildern
 - bestätigtes Drucken über den Windows-Standarddrucker
+- verpflichtende Sicherheitsvorschau vor Speichern, Drucken und E-Mail-Entwurf
+- versionierte lokale Backups mit Manifest und SHA-256-Prüfsummen
+- Wiederherstellungsvorschau, Konfliktschutz und automatischer Sicherungspunkt
+- sichere zufällige Arbeitsverzeichnisse mit Bereinigung nach Nutzung und Programmstart
+- deaktiviertes Plugin-Grundgerüst mit Manifest- und Berechtigungsprüfung
 - lokale `.eml`-Entwürfe mit Sicherheitszusammenfassung statt automatischem Versand
 - Verteilerlisten sowie Austauschpakete mit leerem Profil, Anleitung und Repository-Link
