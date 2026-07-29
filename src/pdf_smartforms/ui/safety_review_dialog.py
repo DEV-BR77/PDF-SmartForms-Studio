@@ -62,10 +62,13 @@ class SafetyReviewDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
         if self.ok_button is None:
             raise RuntimeError("Bestätigungsschaltfläche konnte nicht erstellt werden.")
         self.ok_button.setText(review.action)
         self.ok_button.setEnabled(False)
+        if cancel_button is not None:
+            cancel_button.setText("Abbrechen")
         self.confirmation.toggled.connect(self.ok_button.setEnabled)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)

@@ -48,5 +48,10 @@
 - Wiederherstellungsvorschau, Konfliktschutz und automatischer Sicherungspunkt
 - sichere zufällige Arbeitsverzeichnisse mit Bereinigung nach Nutzung und Programmstart
 - deaktiviertes Plugin-Grundgerüst mit Manifest- und Berechtigungsprüfung
+- vollständiges deutschsprachiges Benutzerhandbuch
+- geprüfte Screenshots für Startseite, Datensicherung und Sicherheitsvorschau
+- eigenes App-Icon als SVG, PNG und Windows-ICO
+- Windows-Releasepaket mit Buildinformationen
+- CycloneDX-Softwarestückliste und SHA-256-Prüfsummen
 - lokale `.eml`-Entwürfe mit Sicherheitszusammenfassung statt automatischem Versand
 - Verteilerlisten sowie Austauschpakete mit leerem Profil, Anleitung und Repository-Link

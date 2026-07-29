@@ -34,9 +34,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[build]"
-      - run: pyinstaller --noconfirm --clean --windowed --name PDF-SmartForms-Studio src/pdf_smartforms/__main__.py
+      - run: .\build_windows.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: PDF-SmartForms-Studio-windows
-          path: dist/PDF-SmartForms-Studio/
-
+          name: PDF-SmartForms-Studio-release-candidate
+          path: release/
