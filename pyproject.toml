@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pdf-smartforms-studio"
+version = "0.1.0a1"
+description = "Local-first PDF form analysis and template studio."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "platformdirs>=4.3,<5",
+  "PyQt6>=6.7,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "black>=24.10,<26",
+  "mypy>=1.13,<2",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<7",
+  "ruff>=0.8,<1",
+]
+build = ["pyinstaller>=6.11,<7"]
+
+[project.scripts]
+pdf-smartforms = "pdf_smartforms.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pdf_smartforms"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["pdf_smartforms"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --strict-config -q --basetemp=.pytest-tmp"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["pdf_smartforms"]
