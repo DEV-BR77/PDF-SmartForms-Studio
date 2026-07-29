@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
@@ -13,9 +13,11 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QGraphicsItem,
     QGraphicsPixmapItem,
     QGraphicsRectItem,
     QGraphicsScene,
+    QGraphicsSceneWheelEvent,
     QGraphicsView,
     QHBoxLayout,
     QLabel,
@@ -32,12 +34,57 @@ from pdf_smartforms.domain.detection import AnalysisResult, DetectedField, Match
 from pdf_smartforms.domain.field_dictionary import SOURCE_LABELS, AliasConflict
 from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.pdf.analyzer import analyze_pdf, render_page
+from pdf_smartforms.signatures.repository import SignatureRepository
 
 _COLORS = {
     MatchStatus.MAPPED: QColor("#1f9d55"),
     MatchStatus.UNCERTAIN: QColor("#d79614"),
     MatchStatus.MISSING: QColor("#d33c3c"),
 }
+
+
+@dataclass(slots=True)
+class SignaturePlacementState:
+    asset_id: str
+    page: int
+    x: float
+    y: float
+    scale: float
+
+
+class SignatureOverlayItem(QGraphicsPixmapItem):
+    """Movable signature preview; mouse wheel scales the selected image."""
+
+    def __init__(self, pixmap: QPixmap, state: SignaturePlacementState) -> None:
+        super().__init__(pixmap)
+        self.state = state
+        self.setFlags(
+            QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+            | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
+            | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
+        )
+        self.setPos(state.x, state.y)
+        self.setScale(state.scale)
+        self.setToolTip(
+            "Unterschriftsbild · mit der Maus verschieben · "
+            "mit dem Mausrad über dem Bild skalieren"
+        )
+
+    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value: object) -> object:
+        result = super().itemChange(change, value)
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            position = self.pos()
+            self.state.x = position.x()
+            self.state.y = position.y()
+        return result
+
+    def wheelEvent(self, event: QGraphicsSceneWheelEvent | None) -> None:
+        if event is None:
+            return
+        factor = 1.08 if event.delta() > 0 else 1 / 1.08
+        self.state.scale = min(3.0, max(0.05, self.state.scale * factor))
+        self.setScale(self.state.scale)
+        event.accept()
 
 
 class PdfAnalysisDialog(QDialog):
@@ -49,12 +96,15 @@ class PdfAnalysisDialog(QDialog):
         self,
         pdf_path: Path,
         dictionary_repository: FieldDictionaryRepository,
+        signature_repository: SignatureRepository,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.pdf_path = pdf_path
         self.dictionary_repository = dictionary_repository
+        self.signature_repository = signature_repository
         self.analysis = analyze_pdf(pdf_path, dictionary_repository.load())
+        self.signature_placements: list[SignaturePlacementState] = []
         self.current_page = 0
         self.overlay_items: dict[str, QGraphicsRectItem] = {}
         self.setWindowTitle(f"PDF analysieren · {self.analysis.title}")
@@ -131,6 +181,19 @@ class PdfAnalysisDialog(QDialog):
         dictionary_actions.addWidget(import_dictionary)
         dictionary_actions.addWidget(export_dictionary)
         side_layout.addLayout(dictionary_actions)
+        side_layout.addWidget(QLabel("Unterschriftsbild"))
+        self.signature_combo = QComboBox()
+        self._reload_signatures()
+        side_layout.addWidget(self.signature_combo)
+        add_signature = QPushButton("Unterschrift auf Seite einfügen")
+        add_signature.clicked.connect(self._add_signature)
+        side_layout.addWidget(add_signature)
+        signature_hint = QLabel(
+            "Bild mit der Maus verschieben; Mausrad über dem Bild skaliert. "
+            "Dies ist keine qualifizierte elektronische Signatur."
+        )
+        signature_hint.setWordWrap(True)
+        side_layout.addWidget(signature_hint)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         side_layout.addWidget(self.summary)
@@ -187,6 +250,7 @@ class PdfAnalysisDialog(QDialog):
                 f"Konfidenz: {field.confidence:.0%}"
             )
             self.overlay_items[field.id] = item
+        self._render_signature_placements()
         self.scene.setSceneRect(0, 0, width, height)
         self.page_label.setText(f"Seite {page_number + 1} von {self.analysis.page_count}")
         self.previous_button.setEnabled(page_number > 0)
@@ -295,6 +359,56 @@ class PdfAnalysisDialog(QDialog):
             "Lexikon exportiert",
             "Der Export enthält ausschließlich Feldbegriffe und Zuordnungen, keine Profilwerte.",
         )
+
+    def _reload_signatures(self) -> None:
+        self.signature_combo.clear()
+        for asset in self.signature_repository.list():
+            owner = "Person 1" if asset.owner.value == "guardian_1" else "Person 2"
+            self.signature_combo.addItem(f"{owner} · {asset.name}", asset.id)
+
+    def _add_signature(self) -> None:
+        asset_id = self.signature_combo.currentData()
+        asset = next(
+            (item for item in self.signature_repository.list() if item.id == asset_id),
+            None,
+        )
+        if asset is None:
+            QMessageBox.information(
+                self,
+                "Keine Unterschrift",
+                "Bitte zuerst unter Unterschriften eine PNG- oder JPG-Datei importieren.",
+            )
+            return
+        pixmap = QPixmap(str(self.signature_repository.image_path(asset)))
+        if pixmap.isNull():
+            QMessageBox.critical(
+                self, "Unterschrift nicht lesbar", "Die gespeicherte Bilddatei fehlt."
+            )
+            return
+        initial_scale = min(1.0, 180 / max(1, pixmap.width()))
+        self.signature_placements.append(
+            SignaturePlacementState(
+                asset_id=asset.id,
+                page=self.current_page,
+                x=120,
+                y=160,
+                scale=initial_scale,
+            )
+        )
+        self._show_page(self.current_page)
+
+    def _render_signature_placements(self) -> None:
+        assets = {asset.id: asset for asset in self.signature_repository.list()}
+        for placement in self.signature_placements:
+            if placement.page != self.current_page:
+                continue
+            asset = assets.get(placement.asset_id)
+            if asset is None:
+                continue
+            pixmap = QPixmap(str(self.signature_repository.image_path(asset)))
+            if pixmap.isNull():
+                continue
+            self.scene.addItem(SignatureOverlayItem(pixmap, placement))
 
     def _previous_page(self) -> None:
         if self.current_page > 0:

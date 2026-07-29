@@ -65,6 +65,13 @@ Optional lernt das lokale Feldlexikon die bestätigte Bezeichnung für künftige
 Formulare. JSON-Import und -Export enthalten ausschließlich Begriffe und
 Zuordnungen – niemals Namen, Adressen oder andere Profilwerte.
 
+`0.6.0-alpha` ergänzt eine lokale Unterschriftenbibliothek für zwei
+erziehungsberechtigte Personen. PNG/JPG-Dateien können zugeschnitten, im
+Kontrast verbessert und von weißem Hintergrund befreit werden. In der
+PDF-Vorschau lassen sie sich mit der Maus verschieben und mit dem Mausrad
+skalieren. Es handelt sich um sichtbare Bildunterschriften, nicht um
+qualifizierte elektronische Signaturen.
+
 ## Repositories
 
 - Anwendung: `DEV-BR77/PDF-SmartForms-Studio`
