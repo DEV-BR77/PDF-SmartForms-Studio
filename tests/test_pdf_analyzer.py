@@ -4,6 +4,7 @@ import pymupdf
 import pytest
 
 from pdf_smartforms.domain.detection import MatchStatus
+from pdf_smartforms.domain.field_dictionary import FieldDictionary
 from pdf_smartforms.domain.templates import TemplateFieldType
 from pdf_smartforms.pdf.analyzer import PdfAnalysisError, analyze_pdf, match_label
 
@@ -55,6 +56,20 @@ def test_label_matching_distinguishes_exact_uncertain_and_missing() -> None:
     assert match_label("Geburtsdatum")[1] == MatchStatus.MAPPED
     assert match_label("Geburtsdatm")[1] == MatchStatus.UNCERTAIN
     assert match_label("Lieblingsfarbe")[1] == MatchStatus.MISSING
+
+
+def test_analyzer_uses_learned_aliases(tmp_path: Path) -> None:
+    path = tmp_path / "learned.pdf"
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text((40, 80), "Sportlername:")
+    document.save(path)
+    document.close()
+    dictionary = FieldDictionary.with_seed_data()
+    dictionary.learn("Sportlername", "participant.first_name")
+    result = analyze_pdf(path, dictionary)
+    assert result.fields[0].source == "participant.first_name"
+    assert result.fields[0].status == MatchStatus.MAPPED
 
 
 def test_date_field_type_is_inferred(tmp_path: Path) -> None:

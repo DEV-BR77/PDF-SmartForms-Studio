@@ -26,3 +26,7 @@
 - visuelle PDF-Vorschau mit Zoom und Seitenwechsel
 - grüne, gelbe und rote Feldrahmen mit zusätzlichen Symbol- und Textstatus
 - lokale Feldzuordnung mit nachvollziehbarer Konfidenz
+- lokales lernendes Feldlexikon ohne Profilwerte
+- manuelle Feldzuordnung direkt in der PDF-Vorschau
+- ausdrücklich bestätigtes Lernen neuer Feldbezeichnungen
+- JSON-Import und -Export mit Konfliktbericht ohne stilles Überschreiben

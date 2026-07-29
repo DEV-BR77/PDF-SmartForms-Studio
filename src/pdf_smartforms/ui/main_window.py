@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from pdf_smartforms.build_info import APP_NAME, __version__
+from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.infrastructure.paths import AppPaths
 from pdf_smartforms.profiles.repository import ProfileRepository
 from pdf_smartforms.templates.repository import TemplateRepository
@@ -90,6 +91,7 @@ class MainWindow(QMainWindow):
         self.paths = paths
         self.profile_repository = ProfileRepository(paths.profiles)
         self.template_repository = TemplateRepository(paths.templates)
+        self.dictionary_repository = FieldDictionaryRepository(paths.field_dictionary)
         self.setWindowTitle(f"{APP_NAME} · {__version__}")
         self.resize(980, 640)
         self.setMinimumSize(760, 520)
@@ -139,7 +141,7 @@ class MainWindow(QMainWindow):
         if not filename:
             return
         try:
-            PdfAnalysisDialog(Path(filename), self).exec()
+            PdfAnalysisDialog(Path(filename), self.dictionary_repository, self).exec()
         except ValueError as error:
             QMessageBox.critical(self, "PDF konnte nicht analysiert werden", str(error))
 
