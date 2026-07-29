@@ -25,6 +25,7 @@ class Guardian:
     last_name: str = ""
     email: str = ""
     phone: str = ""
+    signature_asset_id: str = ""
 
 
 @dataclass(slots=True)

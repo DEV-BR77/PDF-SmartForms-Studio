@@ -25,10 +25,12 @@ from pdf_smartforms.build_info import APP_NAME, __version__
 from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.infrastructure.paths import AppPaths
 from pdf_smartforms.profiles.repository import ProfileRepository
+from pdf_smartforms.signatures.repository import SignatureRepository
 from pdf_smartforms.templates.repository import TemplateRepository
 from pdf_smartforms.ui.about_dialog import AboutDialog
 from pdf_smartforms.ui.pdf_analysis_dialog import PdfAnalysisDialog
 from pdf_smartforms.ui.profile_manager import ProfileManagerDialog
+from pdf_smartforms.ui.signature_manager import SignatureManagerDialog
 from pdf_smartforms.ui.template_manager import TemplateManagerDialog
 
 
@@ -92,6 +94,7 @@ class MainWindow(QMainWindow):
         self.profile_repository = ProfileRepository(paths.profiles)
         self.template_repository = TemplateRepository(paths.templates)
         self.dictionary_repository = FieldDictionaryRepository(paths.field_dictionary)
+        self.signature_repository = SignatureRepository(paths.signatures)
         self.setWindowTitle(f"{APP_NAME} · {__version__}")
         self.resize(980, 640)
         self.setMinimumSize(760, 520)
@@ -119,6 +122,12 @@ class MainWindow(QMainWindow):
         manage_templates.setShortcut("Ctrl+T")
         manage_templates.triggered.connect(self._show_templates)
         template_menu.addAction(manage_templates)
+        signature_menu = QMenu("&Unterschriften", menu_bar)
+        menu_bar.addMenu(signature_menu)
+        manage_signatures = QAction("Unterschriften verwalten", signature_menu)
+        manage_signatures.setShortcut("Ctrl+U")
+        manage_signatures.triggered.connect(self._show_signatures)
+        signature_menu.addAction(manage_signatures)
         help_menu = QMenu("&Hilfe", menu_bar)
         menu_bar.addMenu(help_menu)
         about_action = QAction(f"Über {APP_NAME}", help_menu)
@@ -131,6 +140,9 @@ class MainWindow(QMainWindow):
     def _show_templates(self) -> None:
         TemplateManagerDialog(self.template_repository, self).exec()
 
+    def _show_signatures(self) -> None:
+        SignatureManagerDialog(self.signature_repository, self).exec()
+
     def _select_pdf(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
@@ -141,7 +153,12 @@ class MainWindow(QMainWindow):
         if not filename:
             return
         try:
-            PdfAnalysisDialog(Path(filename), self.dictionary_repository, self).exec()
+            PdfAnalysisDialog(
+                Path(filename),
+                self.dictionary_repository,
+                self.signature_repository,
+                self,
+            ).exec()
         except ValueError as error:
             QMessageBox.critical(self, "PDF konnte nicht analysiert werden", str(error))
 

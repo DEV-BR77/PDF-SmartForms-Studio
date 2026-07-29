@@ -230,7 +230,8 @@ class ProfileEditorDialog(QDialog):
         """Build the profile represented by the current controls."""
         participant_last_name = self.participant_last_name.text().strip()
         guardians: list[Guardian] = []
-        for first_name, last_name, email, phone in self.guardian_fields:
+        existing_guardians = (self.profile.guardian_1, self.profile.guardian_2)
+        for index, (first_name, last_name, email, phone) in enumerate(self.guardian_fields):
             resolved_last_name = last_name.text().strip()
             if (
                 self.copy_last_names.isChecked()
@@ -244,6 +245,7 @@ class ProfileEditorDialog(QDialog):
                     last_name=resolved_last_name,
                     email=email.text().strip(),
                     phone=phone.text().strip(),
+                    signature_asset_id=existing_guardians[index].signature_asset_id,
                 )
             )
         custom_fields: list[CustomField] = []

@@ -30,3 +30,8 @@
 - manuelle Feldzuordnung direkt in der PDF-Vorschau
 - ausdrücklich bestätigtes Lernen neuer Feldbezeichnungen
 - JSON-Import und -Export mit Konfliktbericht ohne stilles Überschreiben
+- lokale Unterschriftenbibliothek für erziehungsberechtigte Person 1 und 2
+- sicherer PNG/JPG-Import mit Größen- und Pixelgrenzen
+- automatisches Zuschneiden, Kontrastverbesserung und optionale Weißtransparenz
+- bewegliche und per Mausrad skalierbare Unterschriftenbilder in der PDF-Vorschau
+- deutliche Abgrenzung von Bildunterschrift und qualifizierter elektronischer Signatur
