@@ -33,7 +33,7 @@ def analyze_pdf(path: Path, dictionary: FieldDictionary | None = None) -> Analys
     if not path.exists() or path.stat().st_size > MAX_PDF_SIZE:
         raise PdfAnalysisError("PDF fehlt oder überschreitet das Größenlimit.")
     try:
-        document = pymupdf.open(path)
+        document: Any = pymupdf.open(path)  # type: ignore[no-untyped-call]
     except (pymupdf.FileDataError, RuntimeError) as error:
         raise PdfAnalysisError(
             "PDF ist beschädigt oder kann nicht sicher gelesen werden."
@@ -45,12 +45,14 @@ def analyze_pdf(path: Path, dictionary: FieldDictionary | None = None) -> Analys
             raise PdfAnalysisError("PDF überschreitet die unterstützte Seitenzahl.")
         active_dictionary = dictionary or FieldDictionary.with_seed_data()
         fields: list[DetectedField] = []
-        for page_number, page in enumerate(document):
+        for page_number in range(document.page_count):
+            page: Any = document.load_page(page_number)
             widget_fields = _analyze_widgets(page, page_number, active_dictionary)
             fields.extend(widget_fields)
             if not widget_fields:
                 fields.extend(_analyze_flat_page(page, page_number, active_dictionary))
-        title = str(document.metadata.get("title") or "").strip() or path.stem
+        metadata: dict[str, Any] = document.metadata or {}
+        title = str(metadata.get("title") or "").strip() or path.stem
         warnings = (
             ("Keine Formularfelder erkannt. Im Designer können Felder manuell angelegt werden.",)
             if not fields
@@ -60,9 +62,10 @@ def analyze_pdf(path: Path, dictionary: FieldDictionary | None = None) -> Analys
 
 
 def render_page(path: Path, page_number: int, scale: float = 1.5) -> tuple[bytes, int, int]:
-    with pymupdf.open(path) as document:
+    with pymupdf.open(path) as document:  # type: ignore[no-untyped-call]
         page = document.load_page(page_number)
-        pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+        matrix = pymupdf.Matrix(scale, scale)  # type: ignore[no-untyped-call]
+        pixmap = page.get_pixmap(matrix=matrix, alpha=False)
         return pixmap.samples, pixmap.width, pixmap.height
 
 
