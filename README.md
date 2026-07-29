@@ -50,6 +50,11 @@ Die Profilverwaltung aus `0.2.0-alpha` ist über **Profile → Profile verwalten
 oder `Strg+P` erreichbar. Sie unterstützt zwei erziehungsberechtigte Personen,
 Kalenderauswahl, flexible Zusatzfelder und lokales JSON.
 
+Die Templateverwaltung aus `0.3.0-alpha` ist über **Templates → Templates
+verwalten** oder `Strg+T` erreichbar. Importiert werden `.psfstemplate`- oder
+ZIP-Pakete nach vollständiger Sicherheitsprüfung. Bestehende Versionen werden
+nicht still überschrieben.
+
 ## Repositories
 
 - Anwendung: `DEV-BR77/PDF-SmartForms-Studio`
