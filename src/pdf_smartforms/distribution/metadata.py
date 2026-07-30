@@ -21,6 +21,7 @@ def suggest_communication(path: Path) -> CommunicationSuggestion:
         first_page_text = document.load_page(0).get_text("text") if document.page_count else ""
         if not title:
             title = _first_heading(first_page_text) or path.stem
+        title = clean_document_title(title, path.stem)
         all_text = "\n".join(
             document.load_page(index).get_text("text") for index in range(document.page_count)
         )
@@ -38,3 +39,11 @@ def _first_heading(text: str) -> str:
         if 4 <= len(candidate) <= 120 and not _EMAIL.fullmatch(candidate):
             return candidate
     return ""
+
+
+def clean_document_title(value: str, fallback: str) -> str:
+    """Keep titles useful in windows, subjects and suggested filenames."""
+    compact = " ".join(value.split()).strip()
+    for separator in (" • ", " | ", " · ", " – "):
+        compact = compact.split(separator, 1)[0].strip()
+    return (compact or fallback).strip()[:80]

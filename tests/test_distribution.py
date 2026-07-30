@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 
 from pdf_smartforms.distribution.document_exporter import export_work_copy
 from pdf_smartforms.distribution.email_draft import create_email_draft
-from pdf_smartforms.distribution.metadata import suggest_communication
+from pdf_smartforms.distribution.metadata import clean_document_title, suggest_communication
 from pdf_smartforms.distribution.repository import DistributionListRepository
 from pdf_smartforms.domain.distribution import DistributionList, PlacedSignature
 
@@ -36,6 +36,16 @@ def test_communication_suggestions_are_local_and_deterministic(tmp_path: Path) -
     assert suggestion.title == "Anmeldung Sportverein"
     assert suggestion.recipients == ("verein@example.org",)
     assert "Anmeldung Sportverein" in suggestion.subject
+
+
+def test_document_title_drops_postal_address_suffix() -> None:
+    assert (
+        clean_document_title(
+            "Bildungszentrum Wolfsburg gGmbH • Postfach 101027 • 38440 Wolfsburg",
+            "Anmeldeformular",
+        )
+        == "Bildungszentrum Wolfsburg gGmbH"
+    )
 
 
 def test_work_copy_embeds_placed_signature(tmp_path: Path) -> None:

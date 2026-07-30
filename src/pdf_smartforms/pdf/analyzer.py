@@ -101,45 +101,29 @@ def _analyze_flat_page(
     page: Any, page_number: int, dictionary: FieldDictionary
 ) -> list[DetectedField]:
     fields: list[DetectedField] = []
-    seen: set[tuple[int, int]] = set()
     aliases = sorted(
         {alias for values in dictionary.entries.values() for alias in values},
         key=len,
         reverse=True,
     )
-    for alias in aliases:
-        for occurrence in page.search_for(alias):
-            position = (round(occurrence.y0), round(occurrence.x0))
-            if position in seen:
-                continue
-            seen.add(position)
-            source, status, confidence = match_label(alias, dictionary)
-            x0 = min(occurrence.x1 + 8, page.rect.width - 80)
-            x1 = max(x0 + 72, page.rect.width - 36)
-            y0 = max(0, occurrence.y0 - 3)
-            y1 = min(page.rect.height, max(occurrence.y1 + 6, y0 + 18))
-            fields.append(
-                DetectedField(
-                    f"text-{page_number}-{len(fields)}",
-                    alias,
-                    _guess_field_type(alias),
-                    page_number,
-                    Rect(x0, y0, x1, y1),
-                    source,
-                    status,
-                    min(confidence, 0.9),
-                    "Textanalyse",
-                )
-            )
-    for word in page.get_text("words"):
-        text = str(word[4]).strip()
-        if not text.endswith(":") or len(text) < 3:
+    for text, bbox, font_size in _text_spans(page):
+        if font_size < 8.0 or not _looks_like_label(text):
             continue
-        label = text.rstrip(":")
-        if any(normalize_label(label) == normalize_label(item.label) for item in fields):
+        label = text.strip().rstrip(":").strip()
+        normalized = normalize_label(label)
+        matching_alias = next(
+            (
+                alias
+                for alias in aliases
+                if normalized == normalize_label(alias)
+                or normalized.startswith(f"{normalize_label(alias)} ")
+            ),
+            None,
+        )
+        if matching_alias is None and not text.rstrip().endswith(":"):
             continue
-        source, status, confidence = match_label(label, dictionary)
-        x0 = min(float(word[2]) + 8, page.rect.width - 80)
+        source, status, confidence = match_label(matching_alias or label, dictionary)
+        x0 = min(float(bbox[2]) + 8, page.rect.width - 80)
         x1 = max(x0 + 72, page.rect.width - 36)
         fields.append(
             DetectedField(
@@ -147,14 +131,51 @@ def _analyze_flat_page(
                 label,
                 _guess_field_type(label),
                 page_number,
-                Rect(x0, float(word[1]) - 3, x1, float(word[3]) + 6),
+                Rect(
+                    x0,
+                    max(0, float(bbox[1]) - 3),
+                    x1,
+                    min(page.rect.height, float(bbox[3]) + 6),
+                ),
                 source,
                 status,
-                confidence,
+                min(confidence, 0.9),
                 "Beschriftungsheuristik",
             )
         )
     return fields
+
+
+def _text_spans(page: Any) -> list[tuple[str, tuple[float, float, float, float], float]]:
+    """Return visible text spans with geometry and font size."""
+    output: list[tuple[str, tuple[float, float, float, float], float]] = []
+    text_dictionary: dict[str, Any] = page.get_text("dict")
+    for block in text_dictionary.get("blocks", []):
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                text = str(span.get("text", "")).strip()
+                bbox = span.get("bbox")
+                if text and isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+                    coordinates = (
+                        float(bbox[0]),
+                        float(bbox[1]),
+                        float(bbox[2]),
+                        float(bbox[3]),
+                    )
+                    output.append(
+                        (
+                            text,
+                            coordinates,
+                            float(span.get("size", 0)),
+                        )
+                    )
+    return output
+
+
+def _looks_like_label(text: str) -> bool:
+    """Reject paragraph fragments, tiny footer text and long legal prose."""
+    normalized = normalize_label(text.rstrip(":"))
+    return 2 <= len(normalized) <= 70 and len(normalized.split()) <= 9
 
 
 def _widget_type(value: str) -> TemplateFieldType:

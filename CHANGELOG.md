@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## [1.0.0-rc.2] – 2026-07-30
+
+### Added
+
+- maximierbares Analysefenster mit automatisch eingepasster PDF-Seite
+- Schaltfläche „Seite“ zum Wiederherstellen der vollständigen Seitenansicht
+- eigener Qt-Druckdialog ohne Abhängigkeit von einer Windows-PDF-Zuordnung
+- direkter Einstieg in den Unterschriftenimport aus der PDF-Analyse
+
+### Changed
+
+- kompaktere Dokumenttitel und sichere, verständliche Standarddateinamen
+- größere Liste erkannter Felder und eindeutige leere manuelle Zuordnung
+- Menüeinträge ohne überlagernde Tastenkürzel
+- restriktivere Beschriftungsanalyse gegen Treffer in Rechtstexten und Fußzeilen
+
+### Fixed
+
+- Drucken schlägt nicht mehr mit Windows-Fehler 1155 fehl
+- PDF-Vorschau bleibt bei einer Fenstergrößenänderung vollständig sichtbar
+- fehlende Unterschriften führen nicht mehr in einen Sackgassen-Hinweis
+
 ### Added
 
 - Produktauftrag, Architektur und ADR-0001 bis ADR-0014
