@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## [1.0.0-rc.3] – 2026-07-30
+
+### Added
+
+- Schaltfläche „Erkennung entfernen“ für Vorschläge, die keine Formularfelder sind
+- sichtbare Versionsnummer direkt in der Titelleiste der PDF-Analyse
+
+### Fixed
+
+- Analysefenster verwendet ausdrücklich normale Minimieren- und Maximieren-Schaltflächen
+- PDF-Seite wird nach dem Anzeigen und nach Größenänderungen zuverlässig neu eingepasst
+
 ## [1.0.0-rc.2] – 2026-07-30
 
 ### Added
