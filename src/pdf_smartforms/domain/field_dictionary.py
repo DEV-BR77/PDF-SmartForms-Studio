@@ -33,10 +33,12 @@ SEED_ALIASES: dict[str, tuple[str, ...]] = {
     "contact.phone": ("telefonnummer", "telefon", "mobil"),
     "contact.email": ("e-mail", "email", "mailadresse"),
     "guardian.1.first_name": (
+        "vorname erziehungsberechtigter",
         "vorname erziehungsberechtigte person",
         "vorname sorgeberechtigte person",
     ),
     "guardian.1.last_name": (
+        "nachname erziehungsberechtigter",
         "nachname erziehungsberechtigte person",
         "nachname sorgeberechtigte person",
     ),

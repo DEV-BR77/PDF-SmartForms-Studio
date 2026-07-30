@@ -7,29 +7,55 @@ from typing import Any
 
 import pymupdf
 
-from pdf_smartforms.domain.distribution import PlacedSignature
+from pdf_smartforms.domain.distribution import PlacedSignature, PlacedText
 
 
 def export_work_copy(
     source_pdf: Path,
     target_pdf: Path,
     signatures: list[PlacedSignature],
+    texts: list[PlacedText] | None = None,
 ) -> Path:
-    """Copy the source and visibly embed explicitly placed signature images."""
+    """Copy the source and visibly embed confirmed profile values and signatures."""
     document: Any = pymupdf.open(source_pdf)  # type: ignore[no-untyped-call]
     try:
-        for placement in signatures:
+        for placement in texts or []:
             if not 0 <= placement.page < document.page_count:
+                raise ValueError("Textfeld verweist auf eine ungültige PDF-Seite.")
+            page = document.load_page(placement.page)
+            available_width = max(10, placement.x1 - placement.x0 - 4)
+            font_size = min(
+                9.0,
+                available_width
+                / max(
+                    1,
+                    pymupdf.get_text_length(
+                        placement.value,
+                        fontname="helv",
+                        fontsize=1,
+                    ),
+                ),
+            )
+            baseline = placement.y0 + (placement.y1 - placement.y0 + font_size * 0.7) / 2
+            page.insert_text(
+                (placement.x0 + 2, baseline),
+                placement.value,
+                fontsize=font_size,
+                fontname="helv",
+                color=(0, 0, 0),
+            )
+        for signature in signatures:
+            if not 0 <= signature.page < document.page_count:
                 raise ValueError("Unterschrift verweist auf eine ungültige PDF-Seite.")
-            image_path = Path(placement.image_path)
+            image_path = Path(signature.image_path)
             if not image_path.exists():
                 raise ValueError("Eine verwendete Unterschriftsdatei fehlt.")
-            page = document.load_page(placement.page)
+            page = document.load_page(signature.page)
             rectangle = pymupdf.Rect(  # type: ignore[no-untyped-call]
-                placement.x0,
-                placement.y0,
-                placement.x1,
-                placement.y1,
+                signature.x0,
+                signature.y0,
+                signature.x1,
+                signature.y1,
             )
             page.insert_image(rectangle, filename=str(image_path), keep_proportion=True)
         target_pdf.parent.mkdir(parents=True, exist_ok=True)

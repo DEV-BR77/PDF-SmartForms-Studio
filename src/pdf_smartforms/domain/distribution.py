@@ -40,3 +40,13 @@ class PlacedSignature:
     y0: float
     x1: float
     y1: float
+
+
+@dataclass(frozen=True, slots=True)
+class PlacedText:
+    value: str
+    page: int
+    x0: float
+    y0: float
+    x1: float
+    y1: float

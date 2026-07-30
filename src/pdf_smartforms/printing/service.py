@@ -8,7 +8,7 @@ from typing import Any
 import pymupdf
 from PyQt6.QtCore import QRectF
 from PyQt6.QtGui import QImage, QPainter
-from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
+from PyQt6.QtPrintSupport import QPrinter, QPrintPreviewDialog
 from PyQt6.QtWidgets import QDialog, QWidget
 
 
@@ -17,45 +17,58 @@ class PdfPrintError(RuntimeError):
 
 
 def print_pdf(path: Path, parent: QWidget | None = None) -> bool:
-    """Show the system print dialog and render every page to the chosen printer."""
+    """Show an application preview and render every page to the chosen printer."""
     printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-    dialog = QPrintDialog(printer, parent)
-    dialog.setWindowTitle("PDF drucken")
-    if dialog.exec() != QDialog.DialogCode.Accepted:
-        return False
     try:
         document: Any = pymupdf.open(path)  # type: ignore[no-untyped-call]
     except (OSError, RuntimeError, pymupdf.FileDataError) as error:
         raise PdfPrintError("Die Druckdatei konnte nicht geöffnet werden.") from error
+    errors: list[PdfPrintError] = []
+
+    def render(printer_to_use: QPrinter) -> None:
+        try:
+            _render_document(document, printer_to_use)
+        except PdfPrintError as error:
+            errors.append(error)
+
+    dialog = QPrintPreviewDialog(printer, parent)
+    dialog.setWindowTitle("Druckvorschau")
+    dialog.paintRequested.connect(render)
+    result = dialog.exec()
+    document.close()
+    if errors:
+        raise errors[-1]
+    return result == QDialog.DialogCode.Accepted
+
+
+def _render_document(document: Any, printer: QPrinter) -> None:
     painter = QPainter()
     try:
         if not painter.begin(printer):
             raise PdfPrintError("Der ausgewählte Drucker konnte nicht gestartet werden.")
-        with document:
-            for page_number in range(document.page_count):
-                page: Any = document.load_page(page_number)
-                render_dpi = min(200, max(96, printer.resolution()))
-                matrix = pymupdf.Matrix(render_dpi / 72, render_dpi / 72)  # type: ignore
-                pixmap = page.get_pixmap(matrix=matrix, alpha=False)
-                image = QImage(
-                    pixmap.samples,
-                    pixmap.width,
-                    pixmap.height,
-                    pixmap.stride,
-                    QImage.Format.Format_RGB888,
-                ).copy()
-                target = _fit_page(
-                    QRectF(printer.pageRect(QPrinter.Unit.DevicePixel)),
-                    image.width(),
-                    image.height(),
-                )
-                painter.drawImage(target, image)
-                if page_number + 1 < document.page_count and not printer.newPage():
-                    raise PdfPrintError("Eine weitere Druckseite konnte nicht angelegt werden.")
+        for page_number in range(document.page_count):
+            page: Any = document.load_page(page_number)
+            render_dpi = min(200, max(96, printer.resolution()))
+            matrix = pymupdf.Matrix(render_dpi / 72, render_dpi / 72)  # type: ignore
+            pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+            image = QImage(
+                pixmap.samples,
+                pixmap.width,
+                pixmap.height,
+                pixmap.stride,
+                QImage.Format.Format_RGB888,
+            ).copy()
+            target = _fit_page(
+                QRectF(printer.pageRect(QPrinter.Unit.DevicePixel)),
+                image.width(),
+                image.height(),
+            )
+            painter.drawImage(target, image)
+            if page_number + 1 < document.page_count and not printer.newPage():
+                raise PdfPrintError("Eine weitere Druckseite konnte nicht angelegt werden.")
     finally:
         if painter.isActive():
             painter.end()
-    return True
 
 
 def _fit_page(area: QRectF, width: int, height: int) -> QRectF:

@@ -10,7 +10,7 @@ from pdf_smartforms.distribution.document_exporter import export_work_copy
 from pdf_smartforms.distribution.email_draft import create_email_draft
 from pdf_smartforms.distribution.metadata import clean_document_title, suggest_communication
 from pdf_smartforms.distribution.repository import DistributionListRepository
-from pdf_smartforms.domain.distribution import DistributionList, PlacedSignature
+from pdf_smartforms.domain.distribution import DistributionList, PlacedSignature, PlacedText
 
 
 def create_contact_pdf(path: Path) -> None:
@@ -48,6 +48,18 @@ def test_document_title_drops_postal_address_suffix() -> None:
     )
 
 
+def test_visible_heading_is_preferred_over_internal_metadata(tmp_path: Path) -> None:
+    pdf = tmp_path / "form.pdf"
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text((40, 80), "Anmeldung Schulverpflegung", fontsize=18)
+    document.set_metadata({"title": "Organisation • Postfach 123"})
+    document.save(pdf)
+    document.close()
+
+    assert suggest_communication(pdf).title == "Anmeldung Schulverpflegung"
+
+
 def test_work_copy_embeds_placed_signature(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
     signature = tmp_path / "signature.png"
@@ -61,6 +73,22 @@ def test_work_copy_embeds_placed_signature(tmp_path: Path) -> None:
     )
     with pymupdf.open(target) as document:
         assert document.load_page(0).get_images()
+
+
+def test_work_copy_embeds_profile_text(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    target = tmp_path / "output.pdf"
+    create_contact_pdf(source)
+
+    export_work_copy(
+        source,
+        target,
+        [],
+        [PlacedText("Mila Radke", 0, 100, 120, 300, 145)],
+    )
+
+    with pymupdf.open(target) as document:
+        assert "Mila Radke" in document.load_page(0).get_text()
 
 
 def test_email_draft_contains_attachment_but_is_not_sent(tmp_path: Path) -> None:

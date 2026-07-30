@@ -11,6 +11,7 @@ from PyQt6.QtCore import QRectF, Qt, QTimer, QUrl
 from PyQt6.QtGui import (
     QColor,
     QDesktopServices,
+    QFont,
     QImage,
     QPen,
     QPixmap,
@@ -36,6 +37,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QSlider,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -46,13 +48,16 @@ from pdf_smartforms.distribution.document_exporter import export_work_copy
 from pdf_smartforms.distribution.email_draft import create_email_draft
 from pdf_smartforms.distribution.metadata import suggest_communication
 from pdf_smartforms.domain.detection import AnalysisResult, DetectedField, MatchStatus
-from pdf_smartforms.domain.distribution import PlacedSignature
+from pdf_smartforms.domain.distribution import PlacedSignature, PlacedText
 from pdf_smartforms.domain.field_dictionary import SOURCE_LABELS, AliasConflict
+from pdf_smartforms.domain.profiles import Profile
 from pdf_smartforms.domain.safety import SafetyReview
 from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.infrastructure.temporary import temporary_workspace
 from pdf_smartforms.pdf.analyzer import analyze_pdf, render_page
 from pdf_smartforms.printing.service import PdfPrintError, print_pdf
+from pdf_smartforms.profiles.repository import ProfileRepository
+from pdf_smartforms.profiles.values import profile_value
 from pdf_smartforms.signatures.repository import SignatureRepository
 from pdf_smartforms.ui.safety_review_dialog import confirm_safety_review
 from pdf_smartforms.ui.signature_manager import SignatureManagerDialog
@@ -151,17 +156,20 @@ class PdfAnalysisDialog(QDialog):
         pdf_path: Path,
         dictionary_repository: FieldDictionaryRepository,
         signature_repository: SignatureRepository,
+        profile_repository: ProfileRepository,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.pdf_path = pdf_path
         self.dictionary_repository = dictionary_repository
         self.signature_repository = signature_repository
+        self.profile_repository = profile_repository
         self.analysis = analyze_pdf(pdf_path, dictionary_repository.load())
         self.communication = suggest_communication(pdf_path)
         self.signature_placements: list[SignaturePlacementState] = []
         self.current_page = 0
         self.overlay_items: dict[str, QGraphicsRectItem] = {}
+        self.signature_items: list[SignatureOverlayItem] = []
         self.setWindowFlags(
             Qt.WindowType.Window
             | Qt.WindowType.WindowMinMaxButtonsHint
@@ -211,12 +219,20 @@ class PdfAnalysisDialog(QDialog):
 
         splitter = QSplitter()
         self.scene = QGraphicsScene(self)
+        self.scene.selectionChanged.connect(self._sync_signature_controls)
         self.view = FitGraphicsView(self.scene)
         self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         splitter.addWidget(self.view)
         side = QWidget()
         side_layout = QVBoxLayout(side)
+        side_layout.addWidget(QLabel("Profil für Vorschau und Ausgabe"))
+        self.profile_combo = QComboBox()
+        self._reload_profiles()
+        self.profile_combo.currentIndexChanged.connect(
+            lambda _index: self._show_page(self.current_page)
+        )
+        side_layout.addWidget(self.profile_combo)
         side_layout.addWidget(QLabel("Erkannte Felder"))
         legend = QLabel(
             "✓ Grün: zugeordnet\n" "⚠ Gelb: Prüfung erforderlich\n" "✕ Rot: nicht zugeordnet"
@@ -260,6 +276,17 @@ class PdfAnalysisDialog(QDialog):
         add_signature = QPushButton("Unterschrift auf Seite einfügen")
         add_signature.clicked.connect(self._add_signature)
         side_layout.addWidget(add_signature)
+        self.signature_scale = QSlider(Qt.Orientation.Horizontal)
+        self.signature_scale.setRange(5, 200)
+        self.signature_scale.setValue(100)
+        self.signature_scale.setEnabled(False)
+        self.signature_scale.setToolTip("Größe der ausgewählten Unterschrift")
+        self.signature_scale.valueChanged.connect(self._change_signature_scale)
+        side_layout.addWidget(QLabel("Größe der ausgewählten Unterschrift"))
+        side_layout.addWidget(self.signature_scale)
+        remove_signature = QPushButton("Ausgewählte Unterschrift löschen")
+        remove_signature.clicked.connect(self._remove_selected_signature)
+        side_layout.addWidget(remove_signature)
         signature_hint = QLabel(
             "Bild mit der Maus verschieben; Mausrad über dem Bild skaliert. "
             "Dies ist keine qualifizierte elektronische Signatur."
@@ -323,6 +350,7 @@ class PdfAnalysisDialog(QDialog):
         image = QImage(samples, width, height, width * 3, QImage.Format.Format_RGB888).copy()
         self.scene.clear()
         self.overlay_items.clear()
+        self.signature_items.clear()
         self.scene.addItem(QGraphicsPixmapItem(QPixmap.fromImage(image)))
         for field in self.analysis.fields:
             if field.page != page_number:
@@ -342,6 +370,19 @@ class PdfAnalysisDialog(QDialog):
                 f"Konfidenz: {field.confidence:.0%}"
             )
             self.overlay_items[field.id] = item
+            value = self._value_for_field(field)
+            if value:
+                text_item = self.scene.addText(value)
+                assert text_item is not None
+                text_item.setFont(QFont("Arial", 8))
+                text_item.setDefaultTextColor(QColor("#102a43"))
+                text_item.setPos(
+                    (rect.x0 + 2) * self.SCALE,
+                    (rect.y0 + 1) * self.SCALE,
+                )
+                text_item.setScale(self.SCALE)
+                text_item.setTextWidth(max(20, rect.width - 4))
+                text_item.setZValue(5)
         self._render_signature_placements()
         self.view.set_page_rect(QRectF(0, 0, width, height))
         self.page_label.setText(f"Seite {page_number + 1} von {self.analysis.page_count}")
@@ -488,6 +529,22 @@ class PdfAnalysisDialog(QDialog):
             owner = "Person 1" if asset.owner.value == "guardian_1" else "Person 2"
             self.signature_combo.addItem(f"{owner} · {asset.name}", asset.id)
 
+    def _reload_profiles(self) -> None:
+        self.profile_combo.clear()
+        profiles = self.profile_repository.list()
+        if not profiles:
+            self.profile_combo.addItem("Kein Profil vorhanden", None)
+            return
+        for profile in profiles:
+            self.profile_combo.addItem(profile.effective_display_name(), profile.id)
+
+    def _selected_profile(self) -> Profile | None:
+        profile_id = self.profile_combo.currentData()
+        return self.profile_repository.get(profile_id) if isinstance(profile_id, str) else None
+
+    def _value_for_field(self, field: DetectedField) -> str:
+        return profile_value(self._selected_profile(), field.source, field.label)
+
     def _add_signature(self) -> None:
         asset_id = self.signature_combo.currentData()
         asset = next(
@@ -510,17 +567,44 @@ class PdfAnalysisDialog(QDialog):
                 self, "Unterschrift nicht lesbar", "Die gespeicherte Bilddatei fehlt."
             )
             return
-        initial_scale = min(1.0, 180 / max(1, pixmap.width()))
+        signature_field = next(
+            (
+                field
+                for field in self.analysis.fields
+                if field.page == self.current_page
+                and (field.source == "signature.date" or "unterschrift" in field.label.casefold())
+            ),
+            None,
+        )
+        existing_on_page = sum(
+            placement.page == self.current_page for placement in self.signature_placements
+        )
+        if signature_field is None:
+            x, y = 120.0, 160.0
+            initial_scale = min(1.0, 180 / max(1, pixmap.width()))
+        else:
+            rect = signature_field.rect
+            slot = min(existing_on_page, 1)
+            x = (rect.x0 + rect.width * (0.36 + 0.32 * slot)) * self.SCALE
+            y = (rect.y0 + 2) * self.SCALE
+            target_width = rect.width * 0.28 * self.SCALE
+            target_height = max(10, rect.height - 4) * self.SCALE
+            initial_scale = min(
+                target_width / max(1, pixmap.width()),
+                target_height / max(1, pixmap.height()),
+            )
         self.signature_placements.append(
             SignaturePlacementState(
                 asset_id=asset.id,
                 page=self.current_page,
-                x=120,
-                y=160,
+                x=x,
+                y=y,
                 scale=initial_scale,
             )
         )
         self._show_page(self.current_page)
+        if self.signature_items:
+            self.signature_items[-1].setSelected(True)
 
     def _render_signature_placements(self) -> None:
         assets = {asset.id: asset for asset in self.signature_repository.list()}
@@ -533,7 +617,45 @@ class PdfAnalysisDialog(QDialog):
             pixmap = QPixmap(str(self.signature_repository.image_path(asset)))
             if pixmap.isNull():
                 continue
-            self.scene.addItem(SignatureOverlayItem(pixmap, placement))
+            item = SignatureOverlayItem(pixmap, placement)
+            item.setZValue(10)
+            self.scene.addItem(item)
+            self.signature_items.append(item)
+
+    def _selected_signature_item(self) -> SignatureOverlayItem | None:
+        return next(
+            (item for item in self.scene.selectedItems() if isinstance(item, SignatureOverlayItem)),
+            None,
+        )
+
+    def _sync_signature_controls(self) -> None:
+        item = self._selected_signature_item()
+        self.signature_scale.setEnabled(item is not None)
+        if item is not None:
+            self.signature_scale.blockSignals(True)
+            self.signature_scale.setValue(round(item.state.scale * 100))
+            self.signature_scale.blockSignals(False)
+
+    def _change_signature_scale(self, value: int) -> None:
+        item = self._selected_signature_item()
+        if item is None:
+            return
+        item.state.scale = value / 100
+        item.setScale(item.state.scale)
+
+    def _remove_selected_signature(self) -> None:
+        item = self._selected_signature_item()
+        if item is None:
+            QMessageBox.information(
+                self,
+                "Unterschrift auswählen",
+                "Bitte zuerst die Unterschrift direkt in der PDF-Vorschau anklicken.",
+            )
+            return
+        self.signature_placements = [
+            placement for placement in self.signature_placements if placement is not item.state
+        ]
+        self._show_page(self.current_page)
 
     def _placed_signatures(self) -> list[PlacedSignature]:
         assets = {asset.id: asset for asset in self.signature_repository.list()}
@@ -554,6 +676,24 @@ class PdfAnalysisDialog(QDialog):
                     y0,
                     x0 + width,
                     y0 + height,
+                )
+            )
+        return output
+
+    def _placed_texts(self) -> list[PlacedText]:
+        output: list[PlacedText] = []
+        for field in self.analysis.fields:
+            value = self._value_for_field(field)
+            if not value:
+                continue
+            output.append(
+                PlacedText(
+                    value,
+                    field.page,
+                    field.rect.x0,
+                    field.rect.y0,
+                    field.rect.x1,
+                    field.rect.y1,
                 )
             )
         return output
@@ -588,7 +728,12 @@ class PdfAnalysisDialog(QDialog):
         if not filename:
             return None
         try:
-            return export_work_copy(self.pdf_path, Path(filename), self._placed_signatures())
+            return export_work_copy(
+                self.pdf_path,
+                Path(filename),
+                self._placed_signatures(),
+                self._placed_texts(),
+            )
         except (OSError, ValueError) as error:
             QMessageBox.critical(self, "PDF konnte nicht gespeichert werden", str(error))
             return None
@@ -610,6 +755,7 @@ class PdfAnalysisDialog(QDialog):
                     self.pdf_path,
                     workspace / "print.pdf",
                     self._placed_signatures(),
+                    self._placed_texts(),
                 )
                 printed = print_pdf(target, self)
         except (OSError, ValueError, PdfPrintError) as error:
@@ -648,7 +794,12 @@ class PdfAnalysisDialog(QDialog):
         ):
             return
         try:
-            export_work_copy(self.pdf_path, pdf_target, self._placed_signatures())
+            export_work_copy(
+                self.pdf_path,
+                pdf_target,
+                self._placed_signatures(),
+                self._placed_texts(),
+            )
             create_email_draft(
                 target,
                 recipients=recipients,

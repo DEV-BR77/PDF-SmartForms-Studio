@@ -17,10 +17,14 @@ def suggest_communication(path: Path) -> CommunicationSuggestion:
     """Read metadata and visible text locally; never sends anything."""
     with pymupdf.open(path) as document:  # type: ignore[no-untyped-call]
         metadata: dict[str, Any] = document.metadata or {}
-        title = str(metadata.get("title") or "").strip()
+        title = _visual_heading(document.load_page(0)) if document.page_count else ""
         first_page_text = document.load_page(0).get_text("text") if document.page_count else ""
         if not title:
-            title = _first_heading(first_page_text) or path.stem
+            title = (
+                str(metadata.get("title") or "").strip()
+                or _first_heading(first_page_text)
+                or path.stem
+            )
         title = clean_document_title(title, path.stem)
         all_text = "\n".join(
             document.load_page(index).get_text("text") for index in range(document.page_count)
@@ -39,6 +43,20 @@ def _first_heading(text: str) -> str:
         if 4 <= len(candidate) <= 120 and not _EMAIL.fullmatch(candidate):
             return candidate
     return ""
+
+
+def _visual_heading(page: Any) -> str:
+    """Prefer the prominent visible form heading over internal PDF metadata."""
+    text_dictionary: dict[str, Any] = page.get_text("dict")
+    candidates: list[tuple[float, str]] = []
+    for block in text_dictionary.get("blocks", []):
+        for line in block.get("lines", []):
+            spans = line.get("spans", [])
+            text = " ".join(str(span.get("text", "")).strip() for span in spans).strip()
+            size = max((float(span.get("size", 0)) for span in spans), default=0)
+            if size >= 13 and 5 <= len(text) <= 120:
+                candidates.append((size, text))
+    return max(candidates, default=(0, ""), key=lambda item: (item[0], len(item[1])))[1]
 
 
 def clean_document_title(value: str, fallback: str) -> str:

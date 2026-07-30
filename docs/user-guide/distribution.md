@@ -3,11 +3,13 @@
 ## Speichern
 
 Erstellt eine neue PDF-Arbeitskopie. Das Original bleibt unverändert.
+Zugeordnete Werte des ausgewählten Profils und bewusst platzierte
+Unterschriftenbilder werden sichtbar eingebettet.
 
 ## Drucken
 
-Erstellt zunächst eine Arbeitskopie und übergibt sie nach Bestätigung an den
-Windows-Standarddrucker.
+Erstellt zunächst eine Arbeitskopie und zeigt eine anwendungsinterne
+Druckvorschau. Von dort wird der Druckdialog geöffnet.
 
 ## E-Mail-Entwurf
 

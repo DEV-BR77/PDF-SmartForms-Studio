@@ -32,6 +32,16 @@ def create_flat_form(path: Path) -> None:
     document.close()
 
 
+def create_table_form(path: Path) -> None:
+    document = pymupdf.open()
+    page = document.new_page()
+    page.draw_rect(pymupdf.Rect(40, 60, 500, 100))
+    page.draw_line((180, 60), (180, 100))
+    page.insert_text((45, 85), "Vorname:")
+    document.save(path)
+    document.close()
+
+
 def test_acroform_fields_are_detected(tmp_path: Path) -> None:
     path = tmp_path / "acroform.pdf"
     create_acroform(path)
@@ -50,6 +60,18 @@ def test_flat_labels_include_mapped_and_missing_fields(tmp_path: Path) -> None:
     statuses = {field.label.casefold(): field.status for field in result.fields}
     assert statuses["vorname"] == MatchStatus.MAPPED
     assert statuses["krankenkasse"] == MatchStatus.MISSING
+
+
+def test_table_borders_define_a_tight_input_rectangle(tmp_path: Path) -> None:
+    path = tmp_path / "table.pdf"
+    create_table_form(path)
+
+    field = analyze_pdf(path).fields[0]
+
+    assert 180 <= field.rect.x0 <= 183
+    assert 497 <= field.rect.x1 <= 500
+    assert 60 <= field.rect.y0 <= 63
+    assert 97 <= field.rect.y1 <= 100
 
 
 def test_small_footer_and_legal_prose_are_not_detected_as_fields(tmp_path: Path) -> None:

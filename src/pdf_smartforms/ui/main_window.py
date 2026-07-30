@@ -205,6 +205,7 @@ class MainWindow(QMainWindow):
                 Path(filename),
                 self.dictionary_repository,
                 self.signature_repository,
+                self.profile_repository,
                 self,
             ).exec()
         except ValueError as error:
@@ -238,6 +239,7 @@ class MainWindow(QMainWindow):
                 pdfs[0],
                 self.dictionary_repository,
                 self.signature_repository,
+                self.profile_repository,
                 self,
             ).exec()
 
