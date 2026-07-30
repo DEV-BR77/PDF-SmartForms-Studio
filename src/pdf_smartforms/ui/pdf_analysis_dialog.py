@@ -6,13 +6,15 @@ import re
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
+from uuid import uuid4
 
-from PyQt6.QtCore import QRectF, Qt, QTimer, QUrl
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QDesktopServices,
     QFont,
     QImage,
+    QMouseEvent,
     QPen,
     QPixmap,
     QResizeEvent,
@@ -23,7 +25,9 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
+    QFormLayout,
     QGraphicsItem,
     QGraphicsPixmapItem,
     QGraphicsRectItem,
@@ -54,6 +58,13 @@ from pdf_smartforms.domain.distribution import PlacedSignature, PlacedText
 from pdf_smartforms.domain.field_dictionary import SOURCE_LABELS, AliasConflict
 from pdf_smartforms.domain.profiles import CustomField, Profile
 from pdf_smartforms.domain.safety import SafetyReview
+from pdf_smartforms.domain.templates import (
+    Rect,
+    Template,
+    TemplateField,
+    TemplateFieldType,
+    TemplateStatus,
+)
 from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.infrastructure.temporary import temporary_workspace
 from pdf_smartforms.pdf.analyzer import analyze_pdf, render_page
@@ -61,6 +72,10 @@ from pdf_smartforms.printing.service import PdfPrintError, print_pdf
 from pdf_smartforms.profiles.repository import ProfileRepository
 from pdf_smartforms.profiles.values import profile_value
 from pdf_smartforms.signatures.repository import SignatureRepository
+from pdf_smartforms.templates.package_builder import build_template_package
+from pdf_smartforms.templates.pdf24_import import load_pdf24_form_spec
+from pdf_smartforms.templates.repository import TemplateRepository
+from pdf_smartforms.ui.profile_editor import ProfileEditorDialog
 from pdf_smartforms.ui.safety_review_dialog import confirm_safety_review
 from pdf_smartforms.ui.signature_manager import SignatureManagerDialog
 
@@ -118,10 +133,15 @@ class SignatureOverlayItem(QGraphicsPixmapItem):
 class FitGraphicsView(QGraphicsView):
     """Keep the complete PDF page visible until the user zooms manually."""
 
+    rectangle_created = pyqtSignal(QRectF)
+
     def __init__(self, scene: QGraphicsScene, parent: QWidget | None = None) -> None:
         super().__init__(scene, parent)
         self.auto_fit = True
         self.page_rect = QRectF()
+        self.draw_start: QPointF | None = None
+        self.draw_preview: QGraphicsRectItem | None = None
+        self.drawing_field = False
 
     def fit_page(self) -> None:
         self.auto_fit = True
@@ -137,6 +157,54 @@ class FitGraphicsView(QGraphicsView):
     def zoom(self, factor: float) -> None:
         self.auto_fit = False
         self.scale(factor, factor)
+
+    def begin_field_draw(self) -> None:
+        self.drawing_field = True
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def mousePressEvent(self, event: QMouseEvent | None) -> None:
+        if event is None:
+            return
+        if self.drawing_field and event.button() == Qt.MouseButton.LeftButton:
+            position = self.mapToScene(event.position().toPoint())
+            if self.page_rect.contains(position):
+                self.draw_start = position
+                scene = self.scene()
+                if scene is not None:
+                    self.draw_preview = scene.addRect(
+                        QRectF(position, position),
+                        QPen(QColor("#235dcc"), 2, Qt.PenStyle.DashLine),
+                    )
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent | None) -> None:
+        if event is None:
+            return
+        if self.draw_start is not None and self.draw_preview is not None:
+            current = self.mapToScene(event.position().toPoint())
+            self.draw_preview.setRect(QRectF(self.draw_start, current).normalized())
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent | None) -> None:
+        if event is None:
+            return
+        if self.draw_start is not None and self.draw_preview is not None:
+            rectangle = self.draw_preview.rect().normalized().intersected(self.page_rect)
+            scene = self.scene()
+            if scene is not None:
+                scene.removeItem(self.draw_preview)
+            self.draw_start = None
+            self.draw_preview = None
+            self.drawing_field = False
+            self.unsetCursor()
+            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+            if rectangle.width() >= 6 and rectangle.height() >= 6:
+                self.rectangle_created.emit(rectangle)
+            return
+        super().mouseReleaseEvent(event)
 
     def resizeEvent(self, event: QResizeEvent | None) -> None:
         super().resizeEvent(event)
@@ -159,6 +227,7 @@ class PdfAnalysisDialog(QDialog):
         dictionary_repository: FieldDictionaryRepository,
         signature_repository: SignatureRepository,
         profile_repository: ProfileRepository,
+        template_repository: TemplateRepository,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -166,6 +235,7 @@ class PdfAnalysisDialog(QDialog):
         self.dictionary_repository = dictionary_repository
         self.signature_repository = signature_repository
         self.profile_repository = profile_repository
+        self.template_repository = template_repository
         self.analysis = analyze_pdf(pdf_path, dictionary_repository.load())
         self.communication = suggest_communication(pdf_path)
         self.signature_placements: list[SignaturePlacementState] = []
@@ -221,8 +291,9 @@ class PdfAnalysisDialog(QDialog):
 
         splitter = QSplitter()
         self.scene = QGraphicsScene(self)
-        self.scene.selectionChanged.connect(self._sync_signature_controls)
+        self.scene.selectionChanged.connect(self._sync_scene_selection)
         self.view = FitGraphicsView(self.scene)
+        self.view.rectangle_created.connect(self._create_manual_field)
         self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
 
@@ -239,6 +310,20 @@ class PdfAnalysisDialog(QDialog):
         self.field_list = QListWidget()
         self.field_list.currentItemChanged.connect(self._focus_selected_field)
         field_layout.addWidget(self.field_list, 1)
+        add_field = QPushButton("Feld auf PDF aufziehen")
+        add_field.clicked.connect(self._begin_manual_field)
+        field_layout.addWidget(add_field)
+        self.show_all_frames = QCheckBox("Alle Feldrahmen anzeigen")
+        self.show_all_frames.setChecked(False)
+        self.show_all_frames.toggled.connect(self._update_overlay_visibility)
+        field_layout.addWidget(self.show_all_frames)
+        save_template = QPushButton("Korrigierte Felder als Vorlage speichern")
+        save_template.setToolTip(
+            "Speichert die aktuelle Erkennung samt manueller Korrekturen "
+            "als wiederverwendbare lokale Vorlage"
+        )
+        save_template.clicked.connect(self._save_as_template)
+        field_layout.addWidget(save_template)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         field_layout.addWidget(self.summary)
@@ -258,6 +343,23 @@ class PdfAnalysisDialog(QDialog):
         self.source_combo = QComboBox()
         self._reload_source_choices()
         side_layout.addWidget(self.source_combo)
+        field_properties = QFormLayout()
+        self.detected_type = QComboBox()
+        for field_type in TemplateFieldType:
+            self.detected_type.addItem(field_type.value, field_type.value)
+        self.detected_x = self._coordinate_input()
+        self.detected_y = self._coordinate_input()
+        self.detected_width = self._coordinate_input(1.0)
+        self.detected_height = self._coordinate_input(1.0)
+        field_properties.addRow("Feldtyp", self.detected_type)
+        field_properties.addRow("X", self.detected_x)
+        field_properties.addRow("Y", self.detected_y)
+        field_properties.addRow("Breite", self.detected_width)
+        field_properties.addRow("Höhe", self.detected_height)
+        side_layout.addLayout(field_properties)
+        apply_geometry = QPushButton("Position und Größe übernehmen")
+        apply_geometry.clicked.connect(self._apply_selected_geometry)
+        side_layout.addWidget(apply_geometry)
         create_profile_field = QPushButton("Neues Profilfeld für diese Angabe")
         create_profile_field.clicked.connect(self._create_custom_profile_field)
         side_layout.addWidget(create_profile_field)
@@ -275,10 +377,13 @@ class PdfAnalysisDialog(QDialog):
         remove_detection.clicked.connect(self._remove_selected_detection)
         side_layout.addWidget(remove_detection)
         dictionary_actions = QHBoxLayout()
+        import_pdf24 = QPushButton("PDF24-Felder")
+        import_pdf24.clicked.connect(self._import_pdf24_fields)
         import_dictionary = QPushButton("Lexikon importieren")
         import_dictionary.clicked.connect(self._import_dictionary)
         export_dictionary = QPushButton("Lexikon exportieren")
         export_dictionary.clicked.connect(self._export_dictionary)
+        dictionary_actions.addWidget(import_pdf24)
         dictionary_actions.addWidget(import_dictionary)
         dictionary_actions.addWidget(export_dictionary)
         side_layout.addLayout(dictionary_actions)
@@ -339,12 +444,24 @@ class PdfAnalysisDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    @staticmethod
+    def _coordinate_input(minimum: float = 0.0) -> QDoubleSpinBox:
+        value = QDoubleSpinBox()
+        value.setRange(minimum, 5000.0)
+        value.setDecimals(1)
+        value.setSingleStep(1.0)
+        value.setSuffix(" pt")
+        return value
+
     def _populate_field_list(self) -> None:
         self.field_list.clear()
         for field in self.analysis.fields:
             item = QListWidgetItem(
                 f"{field.status_label} · Seite {field.page + 1}\n"
-                f"{field.label} → {field.source or 'keine Zuordnung'}"
+                f"{field.label} → {field.source or 'keine Zuordnung'}\n"
+                f"{field.type.value} · {field.origin} · "
+                f"x={field.rect.x0:.0f}, y={field.rect.y0:.0f}, "
+                f"{field.rect.width:.0f}×{field.rect.height:.0f} pt"
             )
             item.setData(Qt.ItemDataRole.UserRole, field.id)
             item.setForeground(_COLORS[field.status])
@@ -361,6 +478,8 @@ class PdfAnalysisDialog(QDialog):
         )
 
     def _show_page(self, page_number: int) -> None:
+        selected = self._selected_field()
+        selected_id = selected.id if selected is not None else ""
         self.current_page = page_number
         samples, width, height = render_page(self.pdf_path, page_number, self.SCALE)
         image = QImage(samples, width, height, width * 3, QImage.Format.Format_RGB888).copy()
@@ -377,9 +496,12 @@ class PdfAnalysisDialog(QDialog):
                 rect.y0 * self.SCALE,
                 rect.width * self.SCALE,
                 rect.height * self.SCALE,
-                QPen(_COLORS[field.status], 3),
+                QPen(_COLORS[field.status], 1),
             )
             assert item is not None
+            item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+            item.setData(0, field.id)
+            item.setVisible(self.show_all_frames.isChecked() or field.id == selected_id)
             item.setToolTip(
                 f"{field.status_label}\n{field.label}\n"
                 f"Quelle: {field.source or 'nicht zugeordnet'}\n"
@@ -424,6 +546,12 @@ class PdfAnalysisDialog(QDialog):
                 self.source_combo.setCurrentIndex(source_index)
         else:
             self.source_combo.setCurrentIndex(0)
+        type_index = self.detected_type.findData(field.type.value)
+        self.detected_type.setCurrentIndex(max(0, type_index))
+        self.detected_x.setValue(field.rect.x0)
+        self.detected_y.setValue(field.rect.y0)
+        self.detected_width.setValue(field.rect.width)
+        self.detected_height.setValue(field.rect.height)
         if field.page != self.current_page:
             self._show_page(field.page)
         overlay = self.overlay_items.get(field.id)
@@ -431,16 +559,260 @@ class PdfAnalysisDialog(QDialog):
             for candidate in self.analysis.fields:
                 candidate_overlay = self.overlay_items.get(candidate.id)
                 if candidate_overlay is not None:
-                    candidate_overlay.setPen(QPen(_COLORS[candidate.status], 3))
+                    candidate_overlay.setPen(QPen(_COLORS[candidate.status], 1))
+                    candidate_overlay.setVisible(self.show_all_frames.isChecked())
+                    candidate_overlay.setZValue(0)
             self.view.centerOn(overlay)
-            overlay.setPen(QPen(QColor("#235dcc"), 6))
+            overlay.setVisible(True)
+            overlay.setPen(QPen(QColor("#235dcc"), 3))
             overlay.setZValue(10)
+            overlay.setSelected(True)
 
     def _selected_field(self) -> DetectedField | None:
         item = self.field_list.currentItem()
         if item is None:
             return None
         return self._field_by_id(str(item.data(Qt.ItemDataRole.UserRole)))
+
+    def _sync_scene_selection(self) -> None:
+        self._sync_signature_controls()
+        for item in self.scene.selectedItems():
+            field_id = item.data(0)
+            if not isinstance(field_id, str):
+                continue
+            for index in range(self.field_list.count()):
+                list_item = self.field_list.item(index)
+                if (
+                    list_item is not None
+                    and str(list_item.data(Qt.ItemDataRole.UserRole)) == field_id
+                ):
+                    self.field_list.setCurrentItem(list_item)
+                    return
+
+    def _update_overlay_visibility(self) -> None:
+        selected = self._selected_field()
+        selected_id = selected.id if selected is not None else ""
+        for field_id, item in self.overlay_items.items():
+            item.setVisible(self.show_all_frames.isChecked() or field_id == selected_id)
+
+    def _begin_manual_field(self) -> None:
+        self.view.begin_field_draw()
+        QMessageBox.information(
+            self,
+            "Feld aufziehen",
+            "Ziehe jetzt mit gedrückter linker Maustaste einen Rahmen auf der PDF-Seite auf.",
+        )
+
+    def _create_manual_field(self, rectangle: QRectF) -> None:
+        label, accepted = QInputDialog.getText(
+            self,
+            "Neues Formularfeld",
+            "Welche Angabe gehört in dieses Feld?",
+        )
+        if not accepted or not label.strip():
+            return
+        labels = {
+            TemplateFieldType.TEXT: "Text",
+            TemplateFieldType.MULTILINE: "Mehrzeiliger Text",
+            TemplateFieldType.DATE: "Datum",
+            TemplateFieldType.CHECKBOX: "Kontrollkästchen",
+            TemplateFieldType.RADIO: "Ja/Nein oder Optionsfeld",
+            TemplateFieldType.CHOICE: "Auswahlliste",
+            TemplateFieldType.SIGNATURE_IMAGE: "Unterschriftsbild",
+            TemplateFieldType.DIGITAL_SIGNATURE: "Digitales Signaturfeld",
+        }
+        type_names = list(labels.values())
+        selected_type, accepted = QInputDialog.getItem(
+            self,
+            "Feldtyp",
+            "Art des Feldes:",
+            type_names,
+            0,
+            False,
+        )
+        if not accepted:
+            return
+        field_type = next(key for key, value in labels.items() if value == selected_type)
+        pdf_rect = Rect(
+            rectangle.left() / self.SCALE,
+            rectangle.top() / self.SCALE,
+            rectangle.right() / self.SCALE,
+            rectangle.bottom() / self.SCALE,
+        )
+        source, status, confidence = self.dictionary_repository.load().match(label)
+        field = DetectedField(
+            id=f"manual-{uuid4().hex[:12]}",
+            label=label.strip(),
+            type=field_type,
+            page=self.current_page,
+            rect=pdf_rect,
+            source=source,
+            status=status,
+            confidence=confidence,
+            origin="Manuell angelegt",
+        )
+        self.analysis = AnalysisResult(
+            self.analysis.title,
+            self.analysis.page_count,
+            (*self.analysis.fields, field),
+            self.analysis.warnings,
+        )
+        self._populate_field_list()
+        self._show_page(self.current_page)
+        self._select_field_id(field.id)
+
+    def _select_field_id(self, field_id: str) -> None:
+        for index in range(self.field_list.count()):
+            item = self.field_list.item(index)
+            if item is not None and str(item.data(Qt.ItemDataRole.UserRole)) == field_id:
+                self.field_list.setCurrentItem(item)
+                return
+
+    def _apply_selected_geometry(self) -> None:
+        field = self._selected_field()
+        if field is None:
+            QMessageBox.information(
+                self, "Feld auswählen", "Bitte zuerst ein Feld in der linken Liste auswählen."
+            )
+            return
+        updated = replace(
+            field,
+            type=TemplateFieldType(str(self.detected_type.currentData())),
+            rect=Rect(
+                self.detected_x.value(),
+                self.detected_y.value(),
+                self.detected_x.value() + self.detected_width.value(),
+                self.detected_y.value() + self.detected_height.value(),
+            ),
+            origin=f"{field.origin} · manuell korrigiert",
+        )
+        self.analysis = AnalysisResult(
+            self.analysis.title,
+            self.analysis.page_count,
+            tuple(updated if item.id == field.id else item for item in self.analysis.fields),
+            self.analysis.warnings,
+        )
+        self._populate_field_list()
+        self._show_page(updated.page)
+        self._select_field_id(updated.id)
+
+    def _import_pdf24_fields(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "PDF24-Formularfelder importieren",
+            "",
+            "PDF24-Formularbeschreibung (*.json)",
+        )
+        if not filename:
+            return
+        try:
+            imported = load_pdf24_form_spec(Path(filename))
+        except ValueError as error:
+            QMessageBox.warning(self, "Import nicht möglich", str(error))
+            return
+        dictionary = self.dictionary_repository.load()
+        fields: list[DetectedField] = []
+        for index, item in enumerate(imported):
+            label = str(item["label"])
+            source, status, confidence = dictionary.match(label.replace("_", " "))
+            fields.append(
+                DetectedField(
+                    id=f"pdf24-{index}-{item['id']}",
+                    label=label,
+                    type=item["type"],
+                    page=int(item["page"]),
+                    rect=item["rect"],
+                    source=source,
+                    status=status,
+                    confidence=confidence,
+                    origin="PDF24-Import",
+                )
+            )
+        if not fields:
+            QMessageBox.information(self, "Keine Felder", "Die Datei enthält keine Felder.")
+            return
+        self.analysis = AnalysisResult(
+            self.analysis.title,
+            self.analysis.page_count,
+            tuple(fields),
+            self.analysis.warnings,
+        )
+        self._populate_field_list()
+        self._show_page(fields[0].page)
+        self._select_field_id(fields[0].id)
+        QMessageBox.information(
+            self,
+            "Formularfelder importiert",
+            f"{len(fields)} Felder wurden übernommen und in der Vorschau angezeigt.",
+        )
+
+    def _save_as_template(self) -> None:
+        """Persist the corrected normal-PDF analysis as a reusable local template."""
+        if not self.analysis.fields:
+            QMessageBox.information(
+                self,
+                "Keine Felder",
+                "Bitte zuerst mindestens ein Feld erkennen oder auf der PDF-Seite aufziehen.",
+            )
+            return
+        name, accepted = QInputDialog.getText(
+            self,
+            "Lokale Vorlage speichern",
+            "Name der Vorlage:",
+            text=self.communication.title,
+        )
+        if not accepted or not name.strip():
+            return
+        template_id = re.sub(r"[^a-z0-9._-]+", "-", name.casefold()).strip("-")
+        template_id = template_id or f"local-{uuid4().hex[:12]}"
+        existing_versions = [
+            item.version for item in self.template_repository.list() if item.id == template_id
+        ]
+        version = f"1.0.{len(existing_versions)}"
+        template = Template(
+            id=template_id,
+            name=name.strip(),
+            version=version,
+            language="de",
+            status=TemplateStatus.LOCAL,
+            minimum_app_version=__version__,
+            source_pdf=self.pdf_path.name,
+            source_pdf_license="Lokale Benutzervorlage",
+            fields=[
+                TemplateField(
+                    id=field.id,
+                    label=field.label,
+                    type=field.type,
+                    page=field.page,
+                    rect=field.rect,
+                    source=field.source or "",
+                )
+                for field in self.analysis.fields
+            ],
+        )
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Vorlagenpaket speichern",
+            str(self.pdf_path.with_name(f"{template_id}-{version}.psfstemplate")),
+            "PDF SmartForms Vorlage (*.psfstemplate)",
+        )
+        if not filename:
+            return
+        target = Path(filename)
+        if target.suffix.casefold() != ".psfstemplate":
+            target = target.with_suffix(".psfstemplate")
+        try:
+            package = build_template_package(template, self.pdf_path, target)
+            self.template_repository.install_package(package)
+        except (FileExistsError, OSError, ValueError) as error:
+            QMessageBox.critical(self, "Vorlage nicht gespeichert", str(error))
+            return
+        QMessageBox.information(
+            self,
+            "Vorlage gespeichert",
+            f"Die korrigierten Felder sind jetzt als lokale Vorlage "
+            f"„{template.name}“ ({template.version}) verfügbar.",
+        )
 
     def _apply_manual_mapping(self) -> None:
         field = self._selected_field()
@@ -527,6 +899,7 @@ class PdfAnalysisDialog(QDialog):
                     Path(filename), overwrite_conflicts=True
                 )
         self._reload_source_choices()
+        self._rematch_fields()
         conflict_text = (
             "\n\nNicht ersetzte Konflikte:\n" + "\n".join(report.conflicts)
             if report.conflicts
@@ -538,6 +911,32 @@ class PdfAnalysisDialog(QDialog):
             f"Neu: {report.added}\nBereits vorhanden: {report.duplicates}"
             f"\nKonflikte: {len(report.conflicts)}{conflict_text}",
         )
+
+    def _rematch_fields(self) -> None:
+        dictionary = self.dictionary_repository.load()
+        fields: list[DetectedField] = []
+        for field in self.analysis.fields:
+            source, status, confidence = dictionary.match(field.label.replace("_", " "))
+            fields.append(
+                replace(
+                    field,
+                    source=source,
+                    status=status,
+                    confidence=confidence,
+                )
+            )
+        selected = self._selected_field()
+        selected_id = selected.id if selected is not None else ""
+        self.analysis = AnalysisResult(
+            self.analysis.title,
+            self.analysis.page_count,
+            tuple(fields),
+            self.analysis.warnings,
+        )
+        self._populate_field_list()
+        self._show_page(self.current_page)
+        if selected_id:
+            self._select_field_id(selected_id)
 
     def _reload_source_choices(self, selected_source: str | None = None) -> None:
         if not hasattr(self, "source_combo"):
@@ -584,12 +983,24 @@ class PdfAnalysisDialog(QDialog):
             )
             return
         if profile is None:
-            QMessageBox.information(
+            answer = QMessageBox.question(
                 self,
-                "Profil erforderlich",
-                "Bitte zuerst ein Profil auswählen oder in der Profilverwaltung anlegen.",
+                "Noch kein Profil vorhanden",
+                "Für ein dauerhaftes Profilfeld wird ein Profil benötigt.\n\n"
+                "Möchtest du jetzt ein Profil anlegen?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
             )
-            return
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            editor = ProfileEditorDialog(parent=self)
+            if editor.exec() != QDialog.DialogCode.Accepted:
+                return
+            self.profile_repository.save(editor.profile)
+            self._reload_profiles()
+            profile_index = self.profile_combo.findData(editor.profile.id)
+            self.profile_combo.setCurrentIndex(max(0, profile_index))
+            profile = editor.profile
         label, accepted = QInputDialog.getText(
             self,
             "Neues Profilfeld",

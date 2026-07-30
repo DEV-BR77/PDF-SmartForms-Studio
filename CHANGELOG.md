@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## [1.0.0-rc.7] – 2026-07-30
+
+### Added
+
+- Normale, flache PDFs sind jetzt der primäre Vorlagen-Workflow.
+- Sichtbare Ja/Nein-Kästchen werden als Optionsfelder vorgeschlagen.
+- Fehlende Felder können direkt mit der Maus auf der PDF-Seite aufgezogen werden.
+- Feldtyp, Position und Größe lassen sich im Analysefenster korrigieren.
+- Korrigierte Analysen können als wiederverwendbare lokale Vorlage gespeichert werden.
+- Die Feldliste zeigt Erkennungsart, Feldtyp und PDF-Koordinaten.
+
+### Changed
+
+- Nur das ausgewählte Feld wird standardmäßig umrahmt; alle Rahmen sind optional.
+- PDF24-JSON ist ein optionaler Import und keine Voraussetzung.
+- Menüeinträge verzichten auf gequetschte Tastenkürzel.
+
 ## [1.0.0-rc.6] – 2026-07-30
 
 ### Added

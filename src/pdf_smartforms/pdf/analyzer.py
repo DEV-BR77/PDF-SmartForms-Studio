@@ -150,7 +150,159 @@ def _analyze_flat_page(
                 "Beschriftungsheuristik",
             )
         )
+    fields.extend(_analyze_checkbox_glyphs(page, page_number, dictionary, len(fields)))
+    fields.extend(_analyze_drawn_choice_boxes(page, page_number, dictionary, len(fields)))
     return fields
+
+
+def _analyze_checkbox_glyphs(
+    page: Any,
+    page_number: int,
+    dictionary: FieldDictionary,
+    start_index: int,
+) -> list[DetectedField]:
+    """Detect visible empty checkbox glyphs, including common Ja/Nein choices."""
+    words = list(page.get_text("words"))
+    output: list[DetectedField] = []
+    symbols = {"☐", "□", "❏", "☒"}
+    for index, word in enumerate(words):
+        if str(word[4]).strip() not in symbols:
+            continue
+        x0, y0, x1, y1 = (float(value) for value in word[:4])
+        block, line = int(word[5]), int(word[6])
+        same_line = [
+            item
+            for item in words
+            if int(item[5]) == block
+            and int(item[6]) == line
+            and float(item[0]) >= x1 - 1
+            and str(item[4]).strip() not in symbols
+        ]
+        option = str(min(same_line, key=lambda item: float(item[0]))[4]) if same_line else ""
+        previous_lines: dict[tuple[int, int], list[Any]] = {}
+        for candidate in words:
+            candidate_bottom = float(candidate[3])
+            candidate_text = str(candidate[4]).strip()
+            if (
+                candidate_bottom <= y0
+                and y0 - candidate_bottom <= 85
+                and candidate_text not in symbols
+                and candidate_text.casefold() not in {"ja", "nein"}
+            ):
+                previous_lines.setdefault((int(candidate[5]), int(candidate[6])), []).append(
+                    candidate
+                )
+        context = ""
+        if previous_lines:
+            nearest = max(
+                previous_lines.values(),
+                key=lambda items: max(float(item[3]) for item in items),
+            )
+            context = " ".join(
+                str(item[4]) for item in sorted(nearest, key=lambda item: float(item[0]))
+            ).strip()
+        label = " – ".join(part for part in (context.rstrip(":"), option) if part)
+        label = label or f"Auswahl {len(output) + 1}"
+        source, status, confidence = match_label(context or label, dictionary)
+        normalized_option = option.casefold().strip(".,:;!?")
+        field_type = (
+            TemplateFieldType.RADIO
+            if normalized_option in {"ja", "nein"}
+            else TemplateFieldType.CHECKBOX
+        )
+        output.append(
+            DetectedField(
+                f"choice-{page_number}-{start_index + index}",
+                label,
+                field_type,
+                page_number,
+                Rect(x0, y0, x1, y1),
+                source,
+                status,
+                confidence,
+                "Sichtbares Auswahlfeld",
+            )
+        )
+    return output
+
+
+def _analyze_drawn_choice_boxes(
+    page: Any,
+    page_number: int,
+    dictionary: FieldDictionary,
+    start_index: int,
+) -> list[DetectedField]:
+    """Detect small drawn boxes next to option labels."""
+    words = list(page.get_text("words"))
+    output: list[DetectedField] = []
+    seen: set[tuple[float, float]] = set()
+    for drawing in page.get_drawings():
+        drawing_rect = drawing.get("rect")
+        if drawing_rect is None or not (
+            4 <= drawing_rect.width <= 20 and 4 <= drawing_rect.height <= 20
+        ):
+            continue
+        marker = (round(float(drawing_rect.x0), 1), round(float(drawing_rect.y0), 1))
+        if marker in seen:
+            continue
+        seen.add(marker)
+        nearby = [
+            word
+            for word in words
+            if float(word[0]) >= drawing_rect.x1 - 2
+            and float(word[0]) <= drawing_rect.x1 + 80
+            and abs(
+                ((float(word[1]) + float(word[3])) / 2)
+                - ((float(drawing_rect.y0) + float(drawing_rect.y1)) / 2)
+            )
+            <= 8
+        ]
+        if not nearby:
+            continue
+        option = str(min(nearby, key=lambda item: float(item[0]))[4]).strip()
+        previous = [
+            word
+            for word in words
+            if float(word[3]) <= drawing_rect.y0
+            and drawing_rect.y0 - float(word[3]) <= 85
+            and str(word[4]).casefold() not in {"ja", "nein"}
+        ]
+        context = ""
+        if previous:
+            nearest_line = max(previous, key=lambda item: float(item[3]))
+            block, line = int(nearest_line[5]), int(nearest_line[6])
+            context = " ".join(
+                str(word[4])
+                for word in sorted(
+                    (word for word in words if int(word[5]) == block and int(word[6]) == line),
+                    key=lambda item: float(item[0]),
+                )
+            ).strip()
+        label = " – ".join(part for part in (context.rstrip(":"), option) if part)
+        source, status, confidence = match_label(context or label, dictionary)
+        output.append(
+            DetectedField(
+                f"drawn-choice-{page_number}-{start_index + len(output)}",
+                label or f"Auswahl {len(output) + 1}",
+                (
+                    TemplateFieldType.RADIO
+                    if option.casefold().strip(".,:;!?") in {"ja", "nein"}
+                    else TemplateFieldType.CHECKBOX
+                ),
+                page_number,
+                Rect(
+                    float(drawing_rect.x0),
+                    float(drawing_rect.y0),
+                    float(drawing_rect.x1),
+                    float(drawing_rect.y1),
+                ),
+                source,
+                status,
+                confidence,
+                "Gezeichnetes Auswahlfeld",
+            )
+        )
+    return output
 
 
 def _table_input_rect(page: Any, bbox: tuple[float, float, float, float]) -> Rect | None:
@@ -267,4 +419,6 @@ def _guess_field_type(label: str) -> TemplateFieldType:
     normalized = normalize_label(label)
     if "datum" in normalized or "geboren" in normalized:
         return TemplateFieldType.DATE
+    if "unterschrift" in normalized:
+        return TemplateFieldType.SIGNATURE_IMAGE
     return TemplateFieldType.TEXT

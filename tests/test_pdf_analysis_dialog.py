@@ -12,6 +12,7 @@ from pdf_smartforms.domain.profiles import Profile
 from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.profiles.repository import ProfileRepository
 from pdf_smartforms.signatures.repository import SignatureRepository
+from pdf_smartforms.templates.repository import TemplateRepository
 from pdf_smartforms.ui.pdf_analysis_dialog import (
     PdfAnalysisDialog,
     SignatureOverlayItem,
@@ -37,6 +38,7 @@ def create_dialog(tmp_path: Path) -> PdfAnalysisDialog:
         FieldDictionaryRepository(tmp_path / "dictionary"),
         SignatureRepository(tmp_path / "signatures"),
         ProfileRepository(tmp_path / "profiles"),
+        TemplateRepository(tmp_path / "templates"),
     )
 
 
@@ -105,6 +107,7 @@ def test_selected_profile_values_are_prepared_for_preview_and_export(tmp_path: P
         FieldDictionaryRepository(tmp_path / "dictionary"),
         SignatureRepository(tmp_path / "signatures"),
         profiles,
+        TemplateRepository(tmp_path / "templates"),
     )
 
     texts = dialog._placed_texts()
