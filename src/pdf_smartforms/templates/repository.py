@@ -51,6 +51,19 @@ class TemplateRepository:
             raise
         return inspected.template
 
+    def install_bundled(self, directory: Path) -> int:
+        """Install new verified packages shipped with an application release."""
+        if not directory.exists():
+            return 0
+        installed = 0
+        for package in sorted(directory.glob("*.psfstemplate")):
+            try:
+                self.install_package(package)
+            except FileExistsError:
+                continue
+            installed += 1
+        return installed
+
     def delete(self, template: Template) -> bool:
         """Remove one exact template version."""
         target = self._version_directory(template)

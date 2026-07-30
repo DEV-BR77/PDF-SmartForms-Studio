@@ -94,6 +94,7 @@ class Template:
     minimum_app_version: str
     source_pdf: str
     source_pdf_license: str = ""
+    document_fingerprint: str = ""
     fields: list[TemplateField] = field(default_factory=list)
 
     def validate(self) -> dict[str, str]:
@@ -152,5 +153,6 @@ class Template:
             minimum_app_version=str(payload["minimum_app_version"]),
             source_pdf=str(payload["source_pdf"]),
             source_pdf_license=str(payload.get("source_pdf_license", "")),
+            document_fingerprint=str(payload.get("document_fingerprint", "")),
             fields=fields,
         )

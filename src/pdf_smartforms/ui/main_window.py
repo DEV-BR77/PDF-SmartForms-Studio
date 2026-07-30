@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -101,6 +102,7 @@ class MainWindow(QMainWindow):
         self.paths = paths
         self.profile_repository = ProfileRepository(paths.profiles)
         self.template_repository = TemplateRepository(paths.templates)
+        self.template_repository.install_bundled(_bundled_template_directory())
         self.dictionary_repository = FieldDictionaryRepository(paths.field_dictionary)
         self.signature_repository = SignatureRepository(paths.signatures)
         self.distribution_repository = DistributionListRepository(paths.distribution_lists)
@@ -253,3 +255,9 @@ class MainWindow(QMainWindow):
             self._show_about()
             return
         super().keyPressEvent(event)
+
+
+def _bundled_template_directory() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "templates"
+    return Path(__file__).resolve().parents[3] / "assets" / "templates"

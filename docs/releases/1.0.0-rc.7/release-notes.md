@@ -24,6 +24,19 @@ erforderlich.
 - Erkennungsart, Feldtyp und Koordinaten in der Feldliste.
 - Lokale Vorlagenspeicherung aus der Analyse.
 - Optionaler, klar getrennter PDF24-Feldimport.
+- Automatische Vorlagenerkennung über einen Fingerabdruck aus stabilen Metadaten,
+  Seitengeometrie und normalisiertem sichtbarem Text.
+- Datenschutzfreundlicher Beitrag zum Vorlagenarchiv ohne PDF, Profile,
+  Feldwerte oder Unterschriften.
+- Mit einem Release ausgelieferte Vorlagen werden beim Start lokal installiert.
+
+## Community und Maintainer
+
+Die Community-Version zeigt keine PDF24-Funktion. Für die Pflege und das
+Anlernen des offiziellen Vorlagenarchivs gibt es einen separaten
+Maintainer-Build. Dieser übernimmt Feldtyp, Seite, Position und Größe aus einer
+PDF24-JSON-Datei. Das Ergebnis wird anschließend wie jede andere lokale Vorlage
+gespeichert und über den Dokumentfingerabdruck wiedererkannt.
 
 ## Bekannte Grenze
 
