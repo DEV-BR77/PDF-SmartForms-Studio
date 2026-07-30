@@ -53,7 +53,10 @@ from PyQt6.QtWidgets import (
 from pdf_smartforms.build_info import MAINTAINER_MODE, __version__
 from pdf_smartforms.distribution.document_exporter import export_work_copy
 from pdf_smartforms.distribution.email_draft import create_email_draft
-from pdf_smartforms.distribution.metadata import suggest_communication
+from pdf_smartforms.distribution.metadata import (
+    suggest_communication,
+    suggest_publication_date,
+)
 from pdf_smartforms.domain.detection import AnalysisResult, DetectedField, MatchStatus
 from pdf_smartforms.domain.distribution import PlacedSignature, PlacedText
 from pdf_smartforms.domain.field_dictionary import SOURCE_LABELS, AliasConflict
@@ -80,6 +83,7 @@ from pdf_smartforms.templates.repository import TemplateRepository
 from pdf_smartforms.ui.profile_editor import ProfileEditorDialog
 from pdf_smartforms.ui.safety_review_dialog import confirm_safety_review
 from pdf_smartforms.ui.signature_manager import SignatureManagerDialog
+from pdf_smartforms.ui.template_metadata_dialog import TemplateMetadataDialog
 
 _COLORS = {
     MatchStatus.MAPPED: QColor("#1f9d55"),
@@ -804,6 +808,15 @@ class PdfAnalysisDialog(QDialog):
         )
         if not accepted or not name.strip():
             return
+        profile = self._selected_profile()
+        metadata_dialog = TemplateMetadataDialog(
+            institution_suggestion=self.communication.title,
+            city_suggestion=profile.city if profile is not None else "",
+            publication_suggestion=suggest_publication_date(self.pdf_path),
+            parent=self,
+        )
+        if metadata_dialog.exec() != QDialog.DialogCode.Accepted:
+            return
         template_id = re.sub(r"[^a-z0-9._-]+", "-", name.casefold()).strip("-")
         template_id = template_id or f"local-{uuid4().hex[:12]}"
         existing_versions = [
@@ -820,6 +833,7 @@ class PdfAnalysisDialog(QDialog):
             source_pdf=self.pdf_path.name,
             source_pdf_license="Lokale Benutzervorlage",
             document_fingerprint=self.document_fingerprint,
+            metadata=metadata_dialog.metadata(),
             fields=[
                 TemplateField(
                     id=field.id,

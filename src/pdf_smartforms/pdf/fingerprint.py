@@ -1,5 +1,7 @@
 """Stable document fingerprints for automatic local template recognition."""
 
+# mypy: disable-error-code="no-untyped-call,attr-defined"
+
 from __future__ import annotations
 
 import hashlib

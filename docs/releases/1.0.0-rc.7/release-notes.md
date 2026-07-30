@@ -29,6 +29,9 @@ erforderlich.
 - Datenschutzfreundlicher Beitrag zum Vorlagenarchiv ohne PDF, Profile,
   Feldwerte oder Unterschriften.
 - Mit einem Release ausgelieferte Vorlagen werden beim Start lokal installiert.
+- Das Startfenster zeigt freiwillig installierbare neue Katalogvorlagen an.
+- Das Metadatenformular erfasst Institution, Kategorie, Ort, Dokumentart,
+  Zielgruppe, Veröffentlichungsdatum, Gültigkeitszeitraum und Schlagwörter.
 
 ## Community und Maintainer
 

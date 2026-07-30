@@ -15,6 +15,10 @@
 - Dokumente werden über einen stabilen Fingerabdruck automatisch lokalen Vorlagen zugeordnet.
 - Anonyme Vorlagenbeiträge enthalten nur Feldschema, Koordinaten und Fingerabdruck.
 - Geprüfte Vorlagen können mit Releases ausgeliefert und beim Start installiert werden.
+- Beim Start wird optional und ohne Zugangsdaten nach neuen Katalogvorlagen gesucht.
+- Neue Vorlagen werden im Startfenster angezeigt und nur auf Wunsch installiert.
+- Vorlagen speichern Institution, Kategorie, Ort, Dokumentart, Zielgruppe,
+  Veröffentlichungsdatum, Gültigkeit und Schlagwörter.
 
 ### Changed
 

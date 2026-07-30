@@ -57,7 +57,7 @@ def inspect_package(package_path: Path) -> InspectedPackage:
         errors = template.validate()
         if errors:
             raise UnsafeTemplatePackage("; ".join(errors.values()))
-        if template.source_pdf not in normalized_names:
+        if template.source_pdf and template.source_pdf not in normalized_names:
             raise UnsafeTemplatePackage("Das im Template genannte Quell-PDF fehlt.")
         checksums_verified = _verify_checksums(archive, normalized_names)
         return InspectedPackage(

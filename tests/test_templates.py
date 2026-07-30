@@ -3,6 +3,7 @@ from pdf_smartforms.domain.templates import (
     Template,
     TemplateField,
     TemplateFieldType,
+    TemplateMetadata,
     TemplateStatus,
 )
 
@@ -16,6 +17,15 @@ def example_template() -> Template:
         status=TemplateStatus.LOCAL,
         minimum_app_version="0.3.0",
         source_pdf="form.pdf",
+        document_fingerprint="sha256:example",
+        metadata=TemplateMetadata(
+            institution_name="Theodor-Heuss-Gymnasium",
+            institution_category="education",
+            city="Wolfsburg",
+            document_type="school_book_loan",
+            document_published_at="2026-06-17",
+            keywords=("Bücherausleihe", "Jahrgang 5"),
+        ),
         fields=[
             TemplateField(
                 id="participant_first_name",
