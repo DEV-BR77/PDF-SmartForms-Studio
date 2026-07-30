@@ -247,6 +247,7 @@ class PdfAnalysisDialog(QDialog):
         self.matched_template_name = self._apply_matching_template()
         self.communication = suggest_communication(pdf_path)
         self.signature_placements: list[SignaturePlacementState] = []
+        self.form_values: dict[str, str] = {}
         self.current_page = 0
         self.overlay_items: dict[str, QGraphicsRectItem] = {}
         self.signature_items: list[SignatureOverlayItem] = []
@@ -363,11 +364,24 @@ class PdfAnalysisDialog(QDialog):
         self.detected_y = self._coordinate_input()
         self.detected_width = self._coordinate_input(1.0)
         self.detected_height = self._coordinate_input(1.0)
+        self.form_question = QLineEdit()
+        self.form_question.setPlaceholderText("z. B. Entgeltliche Lernmittelausleihe")
+        self.form_group = QLineEdit()
+        self.form_group.setPlaceholderText("z. B. lernmittel_entgeltliche_ausleihe")
+        self.form_option = QLineEdit()
+        self.form_option.setPlaceholderText("z. B. Ja oder Nein")
+        self.form_value = QComboBox()
+        self.form_value.setToolTip("Aktuelle Auswahl für Vorschau und PDF-Ausgabe")
+        self.form_value.currentIndexChanged.connect(self._set_form_value)
         field_properties.addRow("Feldtyp", self.detected_type)
         field_properties.addRow("X", self.detected_x)
         field_properties.addRow("Y", self.detected_y)
         field_properties.addRow("Breite", self.detected_width)
         field_properties.addRow("Höhe", self.detected_height)
+        field_properties.addRow("Formularfrage", self.form_question)
+        field_properties.addRow("Optionsgruppe", self.form_group)
+        field_properties.addRow("Auswahlwert", self.form_option)
+        field_properties.addRow("Aktueller Wert", self.form_value)
         side_layout.addLayout(field_properties)
         apply_geometry = QPushButton("Position und Größe übernehmen")
         apply_geometry.clicked.connect(self._apply_selected_geometry)
@@ -375,6 +389,12 @@ class PdfAnalysisDialog(QDialog):
         create_profile_field = QPushButton("Neues Profilfeld für diese Angabe")
         create_profile_field.clicked.connect(self._create_custom_profile_field)
         side_layout.addWidget(create_profile_field)
+        create_runtime_field = QPushButton("Als Formularangabe übernehmen")
+        create_runtime_field.setToolTip(
+            "Speichert Frage und Auswahl nur in der Vorlage, nicht als persönliche Profilangabe"
+        )
+        create_runtime_field.clicked.connect(self._apply_form_mapping)
+        side_layout.addWidget(create_runtime_field)
         self.learn_alias = QCheckBox("Diese Zuordnung künftig lokal erkennen")
         self.learn_alias.setChecked(True)
         side_layout.addWidget(self.learn_alias)
@@ -382,6 +402,12 @@ class PdfAnalysisDialog(QDialog):
         apply_mapping.setObjectName("primary")
         apply_mapping.clicked.connect(self._apply_manual_mapping)
         side_layout.addWidget(apply_mapping)
+        clear_mapping = QPushButton("Zuordnung lösen")
+        clear_mapping.setToolTip(
+            "Entfernt nur die Datenzuordnung; das erkannte Feld bleibt erhalten"
+        )
+        clear_mapping.clicked.connect(self._clear_selected_mapping)
+        side_layout.addWidget(clear_mapping)
         remove_detection = QPushButton("Erkennung entfernen")
         remove_detection.setToolTip(
             "Den markierten Vorschlag nur aus dieser Dokumentanalyse entfernen"
@@ -471,7 +497,7 @@ class PdfAnalysisDialog(QDialog):
         for field in self.analysis.fields:
             item = QListWidgetItem(
                 f"{field.status_label} · Seite {field.page + 1}\n"
-                f"{field.label} → {field.source or 'keine Zuordnung'}\n"
+                f"{field.label} → {self._source_description(field)}\n"
                 f"{field.type.value} · {field.origin} · "
                 f"x={field.rect.x0:.0f}, y={field.rect.y0:.0f}, "
                 f"{field.rect.width:.0f}×{field.rect.height:.0f} pt"
@@ -511,6 +537,7 @@ class PdfAnalysisDialog(QDialog):
                 status=MatchStatus.MAPPED if field.source else MatchStatus.MISSING,
                 confidence=1.0,
                 origin=f"Gespeicherte Vorlage {template.version}",
+                option_value=field.option_value,
             )
             for field in template.fields
         )
@@ -597,6 +624,14 @@ class PdfAnalysisDialog(QDialog):
         self.detected_y.setValue(field.rect.y0)
         self.detected_width.setValue(field.rect.width)
         self.detected_height.setValue(field.rect.height)
+        question = field.label.rsplit(" – ", 1)[0] if " – " in field.label else field.label
+        self.form_question.setText(question)
+        field_source = field.source or ""
+        self.form_group.setText(
+            field_source.removeprefix("form.") if field_source.startswith("form.") else ""
+        )
+        self.form_option.setText(field.option_value or self._option_from_label(field.label))
+        self._reload_form_values(field)
         if field.page != self.current_page:
             self._show_page(field.page)
         overlay = self.overlay_items.get(field.id)
@@ -612,6 +647,51 @@ class PdfAnalysisDialog(QDialog):
             overlay.setPen(QPen(QColor("#235dcc"), 3))
             overlay.setZValue(10)
             overlay.setSelected(True)
+
+    @staticmethod
+    def _option_from_label(label: str) -> str:
+        return label.rsplit(" – ", 1)[1].strip() if " – " in label else ""
+
+    @staticmethod
+    def _runtime_key(value: str) -> str:
+        normalized = re.sub(r"[^a-z0-9]+", "_", value.casefold()).strip("_")
+        return normalized or f"angabe_{uuid4().hex[:8]}"
+
+    def _source_description(self, field: DetectedField) -> str:
+        source = field.source or ""
+        if source.startswith("form."):
+            return f"Formularangabe: {source.removeprefix('form.')}"
+        return source or "keine Zuordnung"
+
+    def _reload_form_values(self, field: DetectedField) -> None:
+        self.form_value.blockSignals(True)
+        self.form_value.clear()
+        self.form_value.addItem("Noch nicht gewählt", "")
+        source = field.source or ""
+        if source.startswith("form."):
+            options = sorted(
+                {
+                    candidate.option_value
+                    for candidate in self.analysis.fields
+                    if candidate.source == source and candidate.option_value
+                },
+                key=str.casefold,
+            )
+            for option in options:
+                self.form_value.addItem(option, option)
+            selected = self.form_values.get(source, "")
+            index = self.form_value.findData(selected)
+            self.form_value.setCurrentIndex(max(0, index))
+        self.form_value.setEnabled(source.startswith("form."))
+        self.form_value.blockSignals(False)
+
+    def _set_form_value(self, _index: int) -> None:
+        field = self._selected_field()
+        if field is None or not (field.source or "").startswith("form."):
+            return
+        value = self.form_value.currentData()
+        self.form_values[field.source or ""] = value if isinstance(value, str) else ""
+        self._show_page(self.current_page)
 
     def _selected_field(self) -> DetectedField | None:
         item = self.field_list.currentItem()
@@ -842,6 +922,7 @@ class PdfAnalysisDialog(QDialog):
                     page=field.page,
                     rect=field.rect,
                     source=field.source or "",
+                    option_value=field.option_value,
                 )
                 for field in self.analysis.fields
             ],
@@ -952,6 +1033,68 @@ class PdfAnalysisDialog(QDialog):
         self._populate_field_list()
         self._show_page(self.current_page)
 
+    def _apply_form_mapping(self) -> None:
+        field = self._selected_field()
+        if field is None:
+            QMessageBox.information(
+                self, "Feld auswählen", "Bitte zuerst ein Ja/Nein- oder Optionsfeld auswählen."
+            )
+            return
+        question = self.form_question.text().strip()
+        option = self.form_option.text().strip()
+        group = self._runtime_key(self.form_group.text().strip() or question)
+        if not question or not option:
+            QMessageBox.information(
+                self,
+                "Formularangabe ergänzen",
+                "Bitte Formularfrage und Auswahlwert eintragen.",
+            )
+            return
+        source = f"form.{group}"
+        updated = replace(
+            field,
+            label=f"{question} – {option}",
+            type=TemplateFieldType.RADIO,
+            source=source,
+            option_value=option,
+            status=MatchStatus.MAPPED,
+            confidence=1.0,
+            origin="Formularangabe · manuell bestätigt",
+        )
+        self.analysis = AnalysisResult(
+            self.analysis.title,
+            self.analysis.page_count,
+            tuple(updated if item.id == field.id else item for item in self.analysis.fields),
+            self.analysis.warnings,
+        )
+        self._populate_field_list()
+        self._show_page(updated.page)
+        self._select_field_id(updated.id)
+
+    def _clear_selected_mapping(self) -> None:
+        field = self._selected_field()
+        if field is None:
+            QMessageBox.information(
+                self, "Feld auswählen", "Bitte zuerst ein erkanntes Feld auswählen."
+            )
+            return
+        updated = replace(
+            field,
+            source=None,
+            status=MatchStatus.MISSING,
+            confidence=0.0,
+            origin=f"{field.origin} · Zuordnung gelöst",
+        )
+        self.analysis = AnalysisResult(
+            self.analysis.title,
+            self.analysis.page_count,
+            tuple(updated if item.id == field.id else item for item in self.analysis.fields),
+            self.analysis.warnings,
+        )
+        self._populate_field_list()
+        self._show_page(updated.page)
+        self._select_field_id(updated.id)
+
     def _remove_selected_detection(self) -> None:
         field = self._selected_field()
         if field is None:
@@ -1023,7 +1166,10 @@ class PdfAnalysisDialog(QDialog):
         dictionary = self.dictionary_repository.load()
         fields: list[DetectedField] = []
         for field in self.analysis.fields:
-            source, status, confidence = dictionary.match(field.label.replace("_", " "))
+            if field.type == TemplateFieldType.RADIO:
+                source, status, confidence = field.source, field.status, field.confidence
+            else:
+                source, status, confidence = dictionary.match(field.label.replace("_", " "))
             fields.append(
                 replace(
                     field,
@@ -1178,6 +1324,9 @@ class PdfAnalysisDialog(QDialog):
         return self.profile_repository.get(profile_id) if isinstance(profile_id, str) else None
 
     def _value_for_field(self, field: DetectedField) -> str:
+        if (field.source or "").startswith("form."):
+            selected = self.form_values.get(field.source or "", "")
+            return "X" if selected and selected == field.option_value else ""
         return profile_value(self._selected_profile(), field.source, field.label)
 
     def _add_signature(self) -> None:

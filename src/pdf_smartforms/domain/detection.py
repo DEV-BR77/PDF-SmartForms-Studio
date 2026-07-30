@@ -25,6 +25,7 @@ class DetectedField:
     status: MatchStatus
     confidence: float
     origin: str
+    option_value: str = ""
 
     @property
     def status_label(self) -> str:
