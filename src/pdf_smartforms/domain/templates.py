@@ -80,6 +80,7 @@ class TemplateField:
     rect: Rect
     source: str = ""
     required: bool = False
+    option_value: str = ""
 
 
 @dataclass(slots=True)
@@ -174,6 +175,7 @@ class Template:
                 rect=Rect(*(float(value) for value in item["rect"])),
                 source=str(item.get("source", "")),
                 required=bool(item.get("required", False)),
+                option_value=str(item.get("option_value", "")),
             )
             for item in payload.get("fields", [])
         ]

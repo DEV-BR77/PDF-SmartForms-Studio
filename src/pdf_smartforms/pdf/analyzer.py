@@ -79,19 +79,38 @@ def _analyze_widgets(
     for index, widget in enumerate(widgets):
         label = str(widget.field_label or widget.field_name or f"Feld {index + 1}")
         match_value = str(widget.field_label or widget.field_name or "").replace("_", " ")
-        source, status, confidence = match_label(match_value, dictionary)
+        field_type = _widget_type(widget.field_type_string or "")
+        option_value = ""
+        source: str | None
+        if field_type == TemplateFieldType.RADIO:
+            states = widget.button_states() or {}
+            option_value = next(
+                (
+                    str(value)
+                    for value in states.get("normal") or ()
+                    if str(value).casefold() != "off"
+                ),
+                "",
+            )
+            group = normalize_label(str(widget.field_name or label)).replace(" ", "_")
+            source, status, confidence = f"form.{group}", MatchStatus.MAPPED, 1.0
+            if option_value:
+                label = f"{label} – {option_value}"
+        else:
+            source, status, confidence = match_label(match_value, dictionary)
         rect = widget.rect
         fields.append(
             DetectedField(
                 f"acroform-{page_number}-{index}",
                 label,
-                _widget_type(widget.field_type_string or ""),
+                field_type,
                 page_number,
                 Rect(rect.x0, rect.y0, rect.x1, rect.y1),
                 source,
                 status,
                 confidence,
                 "AcroForm",
+                option_value,
             )
         )
     return fields
@@ -203,13 +222,16 @@ def _analyze_checkbox_glyphs(
             ).strip()
         label = " – ".join(part for part in (context.rstrip(":"), option) if part)
         label = label or f"Auswahl {len(output) + 1}"
-        source, status, confidence = match_label(context or label, dictionary)
         normalized_option = option.casefold().strip(".,:;!?")
         field_type = (
             TemplateFieldType.RADIO
             if normalized_option in {"ja", "nein"}
             else TemplateFieldType.CHECKBOX
         )
+        if field_type == TemplateFieldType.RADIO:
+            source, status, confidence = None, MatchStatus.MISSING, 0.0
+        else:
+            source, status, confidence = match_label(context or label, dictionary)
         output.append(
             DetectedField(
                 f"choice-{page_number}-{start_index + index}",
@@ -221,6 +243,7 @@ def _analyze_checkbox_glyphs(
                 status,
                 confidence,
                 "Sichtbares Auswahlfeld",
+                option,
             )
         )
     return output
@@ -279,16 +302,21 @@ def _analyze_drawn_choice_boxes(
                 )
             ).strip()
         label = " – ".join(part for part in (context.rstrip(":"), option) if part)
-        source, status, confidence = match_label(context or label, dictionary)
+        normalized_option = option.casefold().strip(".,:;!?")
+        field_type = (
+            TemplateFieldType.RADIO
+            if normalized_option in {"ja", "nein"}
+            else TemplateFieldType.CHECKBOX
+        )
+        if field_type == TemplateFieldType.RADIO:
+            source, status, confidence = None, MatchStatus.MISSING, 0.0
+        else:
+            source, status, confidence = match_label(context or label, dictionary)
         output.append(
             DetectedField(
                 f"drawn-choice-{page_number}-{start_index + len(output)}",
                 label or f"Auswahl {len(output) + 1}",
-                (
-                    TemplateFieldType.RADIO
-                    if option.casefold().strip(".,:;!?") in {"ja", "nein"}
-                    else TemplateFieldType.CHECKBOX
-                ),
+                field_type,
                 page_number,
                 Rect(
                     float(drawing_rect.x0),
@@ -300,6 +328,7 @@ def _analyze_drawn_choice_boxes(
                 status,
                 confidence,
                 "Gezeichnetes Auswahlfeld",
+                option,
             )
         )
     return output

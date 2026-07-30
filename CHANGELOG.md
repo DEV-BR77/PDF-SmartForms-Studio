@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## [1.0.0-rc.8] – 2026-07-30
+
+### Added
+
+- Template-eigene Formularangaben für Ja/Nein- und Optionsgruppen.
+- Bearbeitbare Formularfrage, Gruppenkennung und Auswahlwerte.
+- Aktueller Auswahlwert wird in Vorschau und PDF-Ausgabe als X dargestellt.
+- Eine Datenzuordnung kann gelöst werden, ohne das erkannte Feld zu löschen.
+
+### Fixed
+
+- Optionsfelder werden nicht mehr fälschlich Profilfeldern wie dem Namen zugeordnet.
+- AcroForm-Optionsgruppen übernehmen Gruppenname und Exportwert direkt aus dem PDF.
+
 ## [1.0.0-rc.7] – 2026-07-30
 
 ### Added
