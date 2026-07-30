@@ -25,7 +25,10 @@ class FieldDictionaryRepository:
         payload = json.loads(self.path.read_text(encoding="utf-8"))
         dictionary = FieldDictionary.from_dict(payload)
         report = dictionary.merge(FieldDictionary.with_seed_data())
-        if report.added:
+        migrated = False
+        for alias in ("mobil", "mobiltelefon", "handy", "handynummer"):
+            migrated = dictionary.reassign(alias, "contact.mobile") or migrated
+        if report.added or migrated:
             self.save(dictionary)
         return dictionary
 
@@ -50,9 +53,9 @@ class FieldDictionaryRepository:
             encoding="utf-8",
         )
 
-    def import_from(self, source: Path) -> ImportReport:
+    def import_from(self, source: Path, *, overwrite_conflicts: bool = False) -> ImportReport:
         incoming = FieldDictionary.from_dict(json.loads(source.read_text(encoding="utf-8")))
         current = self.load()
-        report = current.merge(incoming)
+        report = current.merge(incoming, overwrite_conflicts=overwrite_conflicts)
         self.save(current)
         return report

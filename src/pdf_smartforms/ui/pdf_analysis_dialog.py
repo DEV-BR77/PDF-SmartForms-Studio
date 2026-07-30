@@ -31,12 +31,14 @@ from PyQt6.QtWidgets import (
     QGraphicsSceneWheelEvent,
     QGraphicsView,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSplitter,
     QVBoxLayout,
@@ -50,7 +52,7 @@ from pdf_smartforms.distribution.metadata import suggest_communication
 from pdf_smartforms.domain.detection import AnalysisResult, DetectedField, MatchStatus
 from pdf_smartforms.domain.distribution import PlacedSignature, PlacedText
 from pdf_smartforms.domain.field_dictionary import SOURCE_LABELS, AliasConflict
-from pdf_smartforms.domain.profiles import Profile
+from pdf_smartforms.domain.profiles import CustomField, Profile
 from pdf_smartforms.domain.safety import SafetyReview
 from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.infrastructure.temporary import temporary_workspace
@@ -176,7 +178,7 @@ class PdfAnalysisDialog(QDialog):
             | Qt.WindowType.WindowCloseButtonHint
         )
         self.setWindowTitle(f"PDF analysieren · {self.communication.title} · Version {__version__}")
-        self.resize(1180, 760)
+        self.resize(1500, 900)
         self._build_ui()
         self._populate_field_list()
         self._show_page(0)
@@ -223,7 +225,26 @@ class PdfAnalysisDialog(QDialog):
         self.view = FitGraphicsView(self.scene)
         self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+
+        field_panel = QWidget()
+        field_layout = QVBoxLayout(field_panel)
+        field_layout.addWidget(QLabel("<b>Erkannte Felder</b>"))
+        legend = QLabel(
+            "✓ Grün: zugeordnet\n"
+            "⚠ Gelb: Prüfung erforderlich\n"
+            "✕ Rot: nicht zugeordnet\n"
+            "▣ Blau: aktuell ausgewählt"
+        )
+        field_layout.addWidget(legend)
+        self.field_list = QListWidget()
+        self.field_list.currentItemChanged.connect(self._focus_selected_field)
+        field_layout.addWidget(self.field_list, 1)
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        field_layout.addWidget(self.summary)
+        splitter.addWidget(field_panel)
         splitter.addWidget(self.view)
+
         side = QWidget()
         side_layout = QVBoxLayout(side)
         side_layout.addWidget(QLabel("Profil für Vorschau und Ausgabe"))
@@ -233,21 +254,13 @@ class PdfAnalysisDialog(QDialog):
             lambda _index: self._show_page(self.current_page)
         )
         side_layout.addWidget(self.profile_combo)
-        side_layout.addWidget(QLabel("Erkannte Felder"))
-        legend = QLabel(
-            "✓ Grün: zugeordnet\n" "⚠ Gelb: Prüfung erforderlich\n" "✕ Rot: nicht zugeordnet"
-        )
-        side_layout.addWidget(legend)
-        self.field_list = QListWidget()
-        self.field_list.setMinimumHeight(190)
-        self.field_list.currentItemChanged.connect(self._focus_selected_field)
-        side_layout.addWidget(self.field_list, 1)
-        side_layout.addWidget(QLabel("Manuelle Zuordnung"))
+        side_layout.addWidget(QLabel("<b>Zuordnung und Einstellungen</b>"))
         self.source_combo = QComboBox()
-        self.source_combo.addItem("Bitte Datenquelle auswählen", None)
-        for source, label in sorted(SOURCE_LABELS.items(), key=lambda item: item[1]):
-            self.source_combo.addItem(label, source)
+        self._reload_source_choices()
         side_layout.addWidget(self.source_combo)
+        create_profile_field = QPushButton("Neues Profilfeld für diese Angabe")
+        create_profile_field.clicked.connect(self._create_custom_profile_field)
+        side_layout.addWidget(create_profile_field)
         self.learn_alias = QCheckBox("Diese Zuordnung künftig lokal erkennen")
         self.learn_alias.setChecked(True)
         side_layout.addWidget(self.learn_alias)
@@ -310,11 +323,14 @@ class PdfAnalysisDialog(QDialog):
         output_actions.addWidget(print_pdf)
         output_actions.addWidget(email_draft)
         side_layout.addLayout(output_actions)
-        self.summary = QLabel()
-        self.summary.setWordWrap(True)
-        side_layout.addWidget(self.summary)
-        splitter.addWidget(side)
-        splitter.setSizes([820, 320])
+        side_layout.addStretch()
+        settings_scroll = QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        settings_scroll.setWidget(side)
+        splitter.addWidget(settings_scroll)
+        splitter.setChildrenCollapsible(False)
+        splitter.setSizes([300, 820, 360])
         layout.addWidget(splitter)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         close_button = buttons.button(QDialogButtonBox.StandardButton.Close)
@@ -412,8 +428,13 @@ class PdfAnalysisDialog(QDialog):
             self._show_page(field.page)
         overlay = self.overlay_items.get(field.id)
         if overlay is not None:
+            for candidate in self.analysis.fields:
+                candidate_overlay = self.overlay_items.get(candidate.id)
+                if candidate_overlay is not None:
+                    candidate_overlay.setPen(QPen(_COLORS[candidate.status], 3))
             self.view.centerOn(overlay)
-            overlay.setPen(QPen(_COLORS[field.status], 6))
+            overlay.setPen(QPen(QColor("#235dcc"), 6))
+            overlay.setZValue(10)
 
     def _selected_field(self) -> DetectedField | None:
         item = self.field_list.currentItem()
@@ -491,8 +512,23 @@ class PdfAnalysisDialog(QDialog):
         except (OSError, ValueError) as error:
             QMessageBox.critical(self, "Import fehlgeschlagen", str(error))
             return
+        if report.conflicts:
+            answer = QMessageBox.question(
+                self,
+                "Bestehende Zuordnungen ändern?",
+                "Einige Begriffe sind bereits anderen Feldern zugeordnet:\n\n"
+                + "\n".join(report.conflicts)
+                + "\n\nSollen die Zuordnungen aus der importierten Datei diese ersetzen?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                report = self.dictionary_repository.import_from(
+                    Path(filename), overwrite_conflicts=True
+                )
+        self._reload_source_choices()
         conflict_text = (
-            "\n\nKonflikte wurden nicht überschrieben:\n" + "\n".join(report.conflicts)
+            "\n\nNicht ersetzte Konflikte:\n" + "\n".join(report.conflicts)
             if report.conflicts
             else ""
         )
@@ -502,6 +538,85 @@ class PdfAnalysisDialog(QDialog):
             f"Neu: {report.added}\nBereits vorhanden: {report.duplicates}"
             f"\nKonflikte: {len(report.conflicts)}{conflict_text}",
         )
+
+    def _reload_source_choices(self, selected_source: str | None = None) -> None:
+        if not hasattr(self, "source_combo"):
+            return
+        current = selected_source or (
+            str(self.source_combo.currentData())
+            if isinstance(self.source_combo.currentData(), str)
+            else ""
+        )
+        sources = set(SOURCE_LABELS)
+        sources.update(self.dictionary_repository.load().sources())
+        profile = self._selected_profile() if hasattr(self, "profile_combo") else None
+        custom_labels: dict[str, str] = {}
+        if profile is not None:
+            for custom in profile.custom_fields:
+                sources.add(custom.key)
+                custom_labels[custom.key] = custom.label
+        self.source_combo.clear()
+        self.source_combo.addItem("Bitte Datenquelle auswählen", None)
+        choices = [
+            (
+                source,
+                SOURCE_LABELS.get(
+                    source,
+                    custom_labels.get(
+                        source,
+                        source.removeprefix("custom.").replace("_", " ").replace(".", " ").title(),
+                    ),
+                ),
+            )
+            for source in sources
+        ]
+        for source, label in sorted(choices, key=lambda item: item[1].casefold()):
+            self.source_combo.addItem(label, source)
+        index = self.source_combo.findData(current)
+        self.source_combo.setCurrentIndex(max(0, index))
+
+    def _create_custom_profile_field(self) -> None:
+        field = self._selected_field()
+        profile = self._selected_profile()
+        if field is None:
+            QMessageBox.information(
+                self, "Feld auswählen", "Bitte zuerst das neue Formularfeld auswählen."
+            )
+            return
+        if profile is None:
+            QMessageBox.information(
+                self,
+                "Profil erforderlich",
+                "Bitte zuerst ein Profil auswählen oder in der Profilverwaltung anlegen.",
+            )
+            return
+        label, accepted = QInputDialog.getText(
+            self,
+            "Neues Profilfeld",
+            "Bezeichnung des Profilfelds:",
+            text=field.label,
+        )
+        label = label.strip()
+        if not accepted or not label:
+            return
+        value, accepted = QInputDialog.getText(
+            self,
+            "Wert übernehmen",
+            f"Wert für „{label}“ im Profil „{profile.effective_display_name()}“:",
+        )
+        if not accepted:
+            return
+        key = "custom." + re.sub(r"[^a-z0-9]+", "_", label.casefold()).strip("_")
+        existing = next((item for item in profile.custom_fields if item.key == key), None)
+        if existing is None:
+            profile.custom_fields.append(CustomField(key=key, label=label, value=value.strip()))
+        else:
+            existing.label = label
+            existing.value = value.strip()
+        self.profile_repository.save(profile)
+        self.dictionary_repository.learn(field.label, key)
+        self._reload_source_choices(key)
+        self._apply_manual_mapping()
 
     def _export_dictionary(self) -> None:
         filename, _ = QFileDialog.getSaveFileName(
@@ -537,6 +652,8 @@ class PdfAnalysisDialog(QDialog):
             return
         for profile in profiles:
             self.profile_combo.addItem(profile.effective_display_name(), profile.id)
+        if hasattr(self, "source_combo"):
+            self._reload_source_choices()
 
     def _selected_profile(self) -> Profile | None:
         profile_id = self.profile_combo.currentData()

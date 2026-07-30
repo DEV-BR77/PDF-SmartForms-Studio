@@ -10,6 +10,9 @@ from typing import Any
 from pdf_smartforms.domain.detection import MatchStatus
 
 _NORMALIZE = re.compile(r"[^a-z0-9äöüß]+")
+_SOURCE_MIGRATIONS = {
+    "contact.mobil": "contact.mobile",
+}
 
 SEED_ALIASES: dict[str, tuple[str, ...]] = {
     "participant.first_name": (
@@ -27,10 +30,12 @@ SEED_ALIASES: dict[str, tuple[str, ...]] = {
         "nachname",
     ),
     "participant.birth_date": ("geburtsdatum", "geboren am"),
+    "participant.name": ("name teilnehmende person", "vollständiger name teilnehmer"),
     "address.street": ("straße", "strasse", "anschrift"),
     "address.postal_code": ("postleitzahl", "plz"),
     "address.city": ("wohnort", "ort"),
-    "contact.phone": ("telefonnummer", "telefon", "mobil"),
+    "contact.phone": ("festnetz", "telefon festnetz", "festnetznummer"),
+    "contact.mobile": ("mobil", "mobiltelefon", "handy", "handynummer"),
     "contact.email": ("e-mail", "email", "mailadresse"),
     "guardian.1.first_name": (
         "vorname erziehungsberechtigter",
@@ -42,6 +47,11 @@ SEED_ALIASES: dict[str, tuple[str, ...]] = {
         "nachname erziehungsberechtigte person",
         "nachname sorgeberechtigte person",
     ),
+    "guardian.1.name": (
+        "name erziehungsberechtigter",
+        "name erziehungsberechtigte person",
+        "name sorgeberechtigte person",
+    ),
     "signature.date": ("unterschriftsdatum", "datum"),
     "signature.place": ("ort der unterschrift",),
 }
@@ -50,13 +60,16 @@ SOURCE_LABELS: dict[str, str] = {
     "participant.first_name": "Vorname Kind / teilnehmende Person",
     "participant.last_name": "Nachname Kind / teilnehmende Person",
     "participant.birth_date": "Geburtsdatum",
+    "participant.name": "Vollständiger Name Kind / teilnehmende Person",
     "address.street": "Straße",
     "address.postal_code": "PLZ",
     "address.city": "Ort",
-    "contact.phone": "Telefon",
+    "contact.phone": "Telefon (Festnetz)",
+    "contact.mobile": "Telefon (Mobil)",
     "contact.email": "E-Mail",
     "guardian.1.first_name": "Vorname erziehungsberechtigte Person 1",
     "guardian.1.last_name": "Nachname erziehungsberechtigte Person 1",
+    "guardian.1.name": "Vollständiger Name erziehungsberechtigte Person 1",
     "signature.date": "Unterschriftsdatum",
     "signature.place": "Unterschriftsort",
 }
@@ -122,7 +135,25 @@ class FieldDictionary:
             return best_source, MatchStatus.UNCERTAIN, round(best_score, 2)
         return None, MatchStatus.MISSING, round(best_score, 2)
 
-    def merge(self, incoming: FieldDictionary) -> ImportReport:
+    def reassign(self, alias: str, source: str) -> bool:
+        """Move one normalized alias to a source, removing an older assignment."""
+        normalized = normalize_label(alias)
+        if not normalized:
+            raise ValueError("Leerer Feldalias kann nicht zugeordnet werden.")
+        changed = False
+        for existing_source, aliases in self.entries.items():
+            if existing_source != source and normalized in aliases:
+                aliases.remove(normalized)
+                changed = True
+        target = self.entries.setdefault(source, set())
+        if normalized not in target:
+            target.add(normalized)
+            changed = True
+        return changed
+
+    def merge(
+        self, incoming: FieldDictionary, *, overwrite_conflicts: bool = False
+    ) -> ImportReport:
         added = 0
         duplicates = 0
         conflicts: list[str] = []
@@ -134,7 +165,11 @@ class FieldDictionary:
                     else:
                         duplicates += 1
                 except AliasConflict as error:
-                    conflicts.append(str(error))
+                    if overwrite_conflicts:
+                        self.reassign(alias, source)
+                        added += 1
+                    else:
+                        conflicts.append(str(error))
         return ImportReport(added, duplicates, tuple(sorted(conflicts)))
 
     def to_dict(self) -> dict[str, Any]:
@@ -150,8 +185,10 @@ class FieldDictionary:
     def from_dict(cls, payload: dict[str, Any]) -> FieldDictionary:
         if payload.get("schema_version") != "1.0":
             raise ValueError("Nicht unterstützte Feldlexikon-Version.")
-        entries = {
-            str(source): {normalize_label(str(alias)) for alias in aliases}
-            for source, aliases in payload.get("entries", {}).items()
-        }
+        entries: dict[str, set[str]] = {}
+        for source, aliases in payload.get("entries", {}).items():
+            normalized_source = _SOURCE_MIGRATIONS.get(str(source), str(source))
+            entries.setdefault(normalized_source, set()).update(
+                normalize_label(str(alias)) for alias in aliases
+            )
         return cls(language=str(payload.get("language", "de")), entries=entries)

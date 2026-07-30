@@ -85,6 +85,7 @@ class ProfileEditorDialog(QDialog):
         self.postal_code.setMaxLength(10)
         self.city = QLineEdit()
         self.phone = QLineEdit()
+        self.mobile = QLineEdit()
         self.email = QLineEdit()
         address_grid.addWidget(QLabel("Straße"), 0, 0)
         address_grid.addWidget(self.street, 0, 1, 1, 3)
@@ -92,13 +93,15 @@ class ProfileEditorDialog(QDialog):
         address_grid.addWidget(self.postal_code, 1, 1)
         address_grid.addWidget(QLabel("Ort"), 1, 2)
         address_grid.addWidget(self.city, 1, 3)
-        address_grid.addWidget(QLabel("Telefon"), 2, 0)
+        address_grid.addWidget(QLabel("Festnetz"), 2, 0)
         address_grid.addWidget(self.phone, 2, 1)
-        address_grid.addWidget(QLabel("E-Mail"), 2, 2)
-        address_grid.addWidget(self.email, 2, 3)
+        address_grid.addWidget(QLabel("Mobil"), 2, 2)
+        address_grid.addWidget(self.mobile, 2, 3)
+        address_grid.addWidget(QLabel("E-Mail"), 3, 0)
+        address_grid.addWidget(self.email, 3, 1, 1, 3)
         address_grid.addWidget(
             QLabel("Ort wird zugleich als Vorschlag für den Unterschriftsort verwendet."),
-            3,
+            4,
             0,
             1,
             4,
@@ -174,6 +177,7 @@ class ProfileEditorDialog(QDialog):
         self.postal_code.setText(profile.postal_code)
         self.city.setText(profile.city)
         self.phone.setText(profile.phone)
+        self.mobile.setText(profile.mobile)
         self.email.setText(profile.email)
         for widgets, guardian in zip(
             self.guardian_fields,
@@ -289,6 +293,7 @@ class ProfileEditorDialog(QDialog):
             postal_code=self.postal_code.text().strip(),
             city=self.city.text().strip(),
             phone=self.phone.text().strip(),
+            mobile=self.mobile.text().strip(),
             email=self.email.text().strip(),
             guardian_1=guardians[0],
             guardian_2=guardians[1],
