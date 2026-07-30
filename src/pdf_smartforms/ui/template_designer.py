@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QAction,
     QColor,
@@ -16,6 +16,7 @@ from PyQt6.QtGui import (
     QMouseEvent,
     QPen,
     QPixmap,
+    QResizeEvent,
     QUndoCommand,
     QUndoStack,
 )
@@ -23,6 +24,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGraphicsItem,
@@ -37,8 +39,10 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -53,6 +57,7 @@ from pdf_smartforms.domain.templates import (
 )
 from pdf_smartforms.pdf.analyzer import analyze_pdf, render_page
 from pdf_smartforms.templates.package_builder import build_template_package
+from pdf_smartforms.templates.pdf24_import import load_pdf24_form_spec
 from pdf_smartforms.templates.repository import TemplateRepository
 
 _SLUG = re.compile(r"[^a-z0-9._-]+")
@@ -123,12 +128,16 @@ class DesignerView(QGraphicsView):
     """Draw new rectangles by dragging on empty PDF space."""
 
     rectangle_created = pyqtSignal(QRectF)
+    field_selected = pyqtSignal(str)
 
     def __init__(self, scene: QGraphicsScene) -> None:
         super().__init__(scene)
         self.start: QPointF | None = None
         self.preview: QGraphicsRectItem | None = None
         self.setMouseTracking(True)
+        self.setBackgroundBrush(QColor("#454545"))
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def mousePressEvent(self, event: QMouseEvent | None) -> None:
         if event is None:
@@ -147,6 +156,10 @@ class DesignerView(QGraphicsView):
                 )
                 return
         super().mousePressEvent(event)
+        scene = self.scene()
+        selected = scene.selectedItems() if scene is not None else []
+        if selected and isinstance(selected[0], DesignerFieldItem):
+            self.field_selected.emit(selected[0].field.id)
 
     def mouseMoveEvent(self, event: QMouseEvent | None) -> None:
         if event is None:
@@ -219,7 +232,12 @@ class TemplateDesignerDialog(QDialog):
         self.items: dict[str, DesignerFieldItem] = {}
         self.undo_stack = QUndoStack(self)
         self.setWindowTitle("Neues Template erstellen")
-        self.resize(1280, 820)
+        self.resize(1440, 900)
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowType.WindowMaximizeButtonHint
+            | Qt.WindowType.WindowMinimizeButtonHint
+        )
         self._build_ui()
         for detected in self.analysis.fields:
             self.fields.append(
@@ -238,6 +256,20 @@ class TemplateDesignerDialog(QDialog):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         toolbar = QToolBar()
+        toolbar.setMovable(False)
+        fit_action = QAction("Seite einpassen", self)
+        fit_action.setShortcut("Ctrl+0")
+        fit_action.triggered.connect(self._fit_page)
+        zoom_out = QAction("−", self)
+        zoom_out.setShortcut("Ctrl+-")
+        zoom_out.triggered.connect(lambda: self.view.scale(0.85, 0.85))
+        zoom_in = QAction("+", self)
+        zoom_in.setShortcut("Ctrl++")
+        zoom_in.triggered.connect(lambda: self.view.scale(1.15, 1.15))
+        toolbar.addAction(fit_action)
+        toolbar.addAction(zoom_out)
+        toolbar.addAction(zoom_in)
+        toolbar.addSeparator()
         undo_action = self.undo_stack.createUndoAction(self, "Rückgängig")
         assert undo_action is not None
         undo_action.setShortcut("Ctrl+Z")
@@ -250,6 +282,39 @@ class TemplateDesignerDialog(QDialog):
         delete_action.setShortcut("Delete")
         delete_action.triggered.connect(self._delete_selected)
         toolbar.addAction(delete_action)
+        toolbar.addSeparator()
+        add_button = QToolButton()
+        add_button.setText("+ Feld hinzufügen")
+        add_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        add_menu = add_button.menu()
+        if add_menu is None:
+            from PyQt6.QtWidgets import QMenu
+
+            add_menu = QMenu(add_button)
+            add_button.setMenu(add_menu)
+        for field_type, label in (
+            (TemplateFieldType.TEXT, "Textfeld"),
+            (TemplateFieldType.MULTILINE, "Mehrzeiliges Textfeld"),
+            (TemplateFieldType.DATE, "Datum"),
+            (TemplateFieldType.CHECKBOX, "Kontrollkästchen"),
+            (TemplateFieldType.RADIO, "Optionsfeld"),
+            (TemplateFieldType.CHOICE, "Auswahlliste"),
+            (TemplateFieldType.SIGNATURE_IMAGE, "Unterschriftsbild"),
+            (TemplateFieldType.DIGITAL_SIGNATURE, "Digitales Signaturfeld"),
+        ):
+            action = QAction(label, add_menu)
+            add_menu.addAction(action)
+            action.setData(field_type.value)
+            action.triggered.connect(
+                lambda _checked=False, value=field_type: self._arm_field_type(value)
+            )
+        toolbar.addWidget(add_button)
+        self.draw_hint = QLabel("  Ziehe anschließend das Feld auf der PDF-Seite auf.")
+        toolbar.addWidget(self.draw_hint)
+        toolbar.addSeparator()
+        import_pdf24 = QAction("PDF24-Formular importieren", self)
+        import_pdf24.triggered.connect(self._import_pdf24_spec)
+        toolbar.addAction(import_pdf24)
         toolbar.addSeparator()
         previous_page = QAction("← Seite", self)
         previous_page.triggered.connect(self._previous_page)
@@ -274,16 +339,28 @@ class TemplateDesignerDialog(QDialog):
         layout.addLayout(metadata)
 
         splitter = QSplitter()
+        splitter.setChildrenCollapsible(False)
         self.scene = QGraphicsScene(self)
         self.view = DesignerView(self.scene)
         self.view.rectangle_created.connect(self._create_field)
-        splitter.addWidget(self.view)
-        side = QWidget()
-        side_layout = QVBoxLayout(side)
-        side_layout.addWidget(QLabel("Auf leerer PDF-Fläche ziehen, um ein Feld anzulegen."))
+        self.view.field_selected.connect(self._select_field_id)
+        self.pending_field_type = TemplateFieldType.TEXT
+
+        field_panel = QWidget()
+        field_layout = QVBoxLayout(field_panel)
+        field_layout.addWidget(QLabel("<b>Felder auf der Seite</b>"))
         self.field_list = QListWidget()
         self.field_list.currentItemChanged.connect(self._select_from_list)
-        side_layout.addWidget(self.field_list)
+        field_layout.addWidget(self.field_list)
+        delete_button = QPushButton("Ausgewähltes Feld löschen")
+        delete_button.clicked.connect(self._delete_selected)
+        field_layout.addWidget(delete_button)
+        splitter.addWidget(field_panel)
+        splitter.addWidget(self.view)
+
+        side = QWidget()
+        side_layout = QVBoxLayout(side)
+        side_layout.addWidget(QLabel("<b>Eigenschaften</b>"))
         properties = QFormLayout()
         self.field_label = QLineEdit()
         self.field_label.editingFinished.connect(self._apply_properties)
@@ -298,10 +375,25 @@ class TemplateDesignerDialog(QDialog):
         self.field_source.currentIndexChanged.connect(self._apply_properties)
         self.required = QCheckBox("Pflichtfeld")
         self.required.toggled.connect(self._apply_properties)
+        self.x_position = self._coordinate_input()
+        self.y_position = self._coordinate_input()
+        self.field_width = self._coordinate_input(minimum=1.0)
+        self.field_height = self._coordinate_input(minimum=1.0)
+        for coordinate in (
+            self.x_position,
+            self.y_position,
+            self.field_width,
+            self.field_height,
+        ):
+            coordinate.editingFinished.connect(self._apply_coordinates)
         properties.addRow("Bezeichnung", self.field_label)
         properties.addRow("Feldtyp", self.field_type)
         properties.addRow("Datenquelle", self.field_source)
         properties.addRow("", self.required)
+        properties.addRow("X-Position", self.x_position)
+        properties.addRow("Y-Position", self.y_position)
+        properties.addRow("Breite", self.field_width)
+        properties.addRow("Höhe", self.field_height)
         side_layout.addLayout(properties)
         self.coordinates = QLabel("Kein Feld ausgewählt")
         self.coordinates.setWordWrap(True)
@@ -311,8 +403,21 @@ class TemplateDesignerDialog(QDialog):
         save_button.clicked.connect(self._save_template)
         side_layout.addWidget(save_button)
         splitter.addWidget(side)
-        splitter.setSizes([900, 360])
+        splitter.setSizes([260, 900, 360])
         layout.addWidget(splitter)
+
+    def resizeEvent(self, event: QResizeEvent | None) -> None:
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._fit_page)
+
+    @staticmethod
+    def _coordinate_input(minimum: float = 0.0) -> QDoubleSpinBox:
+        value = QDoubleSpinBox()
+        value.setRange(minimum, 5000.0)
+        value.setDecimals(1)
+        value.setSingleStep(1.0)
+        value.setSuffix(" pt")
+        return value
 
     def _show_page(self, page_number: int) -> None:
         self.current_page = page_number
@@ -348,6 +453,7 @@ class TemplateDesignerDialog(QDialog):
             self.items[field.id] = item
         self.scene.setSceneRect(0, 0, width, height)
         self.page_label.setText(f"Seite {page_number + 1} von {self.analysis.page_count}")
+        self._fit_page()
 
     def _create_field(self, rectangle: QRectF) -> None:
         pdf_rect = Rect(
@@ -359,11 +465,32 @@ class TemplateDesignerDialog(QDialog):
         field = DesignerField(
             id=f"field-{uuid4().hex[:10]}",
             label="Neues Feld",
-            type=TemplateFieldType.TEXT,
+            type=self.pending_field_type,
             page=self.current_page,
             rect=pdf_rect,
         )
         self.undo_stack.push(AddFieldCommand(self, field))
+        self.pending_field_type = TemplateFieldType.TEXT
+        self.draw_hint.setText("  Feld angelegt. Auswählen, verschieben oder Eigenschaften ändern.")
+
+    def _arm_field_type(self, field_type: TemplateFieldType) -> None:
+        self.pending_field_type = field_type
+        self.draw_hint.setText(
+            f"  {self._field_type_label(field_type)}: Bereich auf der PDF-Seite aufziehen."
+        )
+
+    @staticmethod
+    def _field_type_label(field_type: TemplateFieldType) -> str:
+        return {
+            TemplateFieldType.TEXT: "Textfeld",
+            TemplateFieldType.MULTILINE: "Mehrzeiliges Textfeld",
+            TemplateFieldType.DATE: "Datum",
+            TemplateFieldType.CHECKBOX: "Kontrollkästchen",
+            TemplateFieldType.RADIO: "Optionsfeld",
+            TemplateFieldType.CHOICE: "Auswahlliste",
+            TemplateFieldType.SIGNATURE_IMAGE: "Unterschriftsbild",
+            TemplateFieldType.DIGITAL_SIGNATURE: "Digitales Signaturfeld",
+        }[field_type]
 
     def insert_field(self, field: DesignerField) -> None:
         if all(existing.id != field.id for existing in self.fields):
@@ -387,6 +514,13 @@ class TemplateDesignerDialog(QDialog):
         field = self._selected_field()
         if field is not None:
             self.undo_stack.push(DeleteFieldCommand(self, field))
+
+    def _select_field_id(self, field_id: str) -> None:
+        for index in range(self.field_list.count()):
+            item = self.field_list.item(index)
+            if item is not None and str(item.data(Qt.ItemDataRole.UserRole)) == field_id:
+                self.field_list.setCurrentItem(item)
+                return
 
     def _refresh_list(self, selected_id: str | None = None) -> None:
         current_id = selected_id
@@ -420,6 +554,10 @@ class TemplateDesignerDialog(QDialog):
         source_index = self.field_source.findData(field.source)
         self.field_source.setCurrentIndex(max(0, source_index))
         self.required.setChecked(field.required)
+        self.x_position.setValue(field.rect.x0)
+        self.y_position.setValue(field.rect.y0)
+        self.field_width.setValue(field.rect.width)
+        self.field_height.setValue(field.rect.height)
         self._show_coordinates(field)
         graphics_item = self.items.get(field.id)
         if graphics_item:
@@ -437,6 +575,19 @@ class TemplateDesignerDialog(QDialog):
         field.required = self.required.isChecked()
         self._refresh_list(field.id)
 
+    def _apply_coordinates(self) -> None:
+        field = self._selected_field()
+        if field is None:
+            return
+        field.rect = Rect(
+            self.x_position.value(),
+            self.y_position.value(),
+            self.x_position.value() + self.field_width.value(),
+            self.y_position.value() + self.field_height.value(),
+        )
+        self._show_page(self.current_page)
+        self._refresh_list(field.id)
+
     def _item_moved(self, field_id: str) -> None:
         item = self.items.get(field_id)
         field = next((entry for entry in self.fields if entry.id == field_id), None)
@@ -449,6 +600,10 @@ class TemplateDesignerDialog(QDialog):
             (position.x() + item.rect().width()) / self.SCALE,
             (position.y() + item.rect().height()) / self.SCALE,
         )
+        self.x_position.setValue(field.rect.x0)
+        self.y_position.setValue(field.rect.y0)
+        self.field_width.setValue(field.rect.width)
+        self.field_height.setValue(field.rect.height)
         self._show_coordinates(field)
 
     def _show_coordinates(self, field: DesignerField) -> None:
@@ -465,6 +620,55 @@ class TemplateDesignerDialog(QDialog):
     def _next_page(self) -> None:
         if self.current_page + 1 < self.analysis.page_count:
             self._show_page(self.current_page + 1)
+
+    def _fit_page(self) -> None:
+        if not hasattr(self, "view") or self.scene.sceneRect().isEmpty():
+            return
+        self.view.resetTransform()
+        self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+    def _import_pdf24_spec(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "PDF24-Formular importieren",
+            "",
+            "PDF24-Formularbeschreibung (*.json)",
+        )
+        if not filename:
+            return
+        try:
+            imported = load_pdf24_form_spec(Path(filename))
+        except ValueError as error:
+            QMessageBox.warning(self, "Import nicht möglich", str(error))
+            return
+        if self.fields:
+            choice = QMessageBox.question(
+                self,
+                "Erkannte Felder ersetzen?",
+                f"PDF24 enthält {len(imported)} Felder.\n\n"
+                "Sollen die aktuell erkannten Felder dadurch ersetzt werden?",
+            )
+            if choice != QMessageBox.StandardButton.Yes:
+                return
+        self.fields = [
+            DesignerField(
+                id=str(item["id"]),
+                label=str(item["label"]),
+                type=item["type"],
+                page=int(item["page"]),
+                rect=item["rect"],
+                required=bool(item["required"]),
+            )
+            for item in imported
+        ]
+        self._refresh_list()
+        self._show_page(0)
+        QMessageBox.information(
+            self,
+            "PDF24-Formular importiert",
+            f"{len(self.fields)} Felder wurden übernommen.\n\n"
+            "Bitte ordne rechts die passenden Profil- oder Einmalfelder zu.",
+        )
 
     def _save_template(self) -> None:
         template_id = _slugify(self.template_id.text())

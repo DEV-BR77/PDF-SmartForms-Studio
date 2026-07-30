@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## [1.0.0-rc.5] – 2026-07-30
+
+### Added
+
+- dreigeteilter Template-Designer mit Feldliste, PDF-Arbeitsfläche und Eigenschaften
+- direktes Anlegen von Text-, Datums-, Auswahl-, Checkbox- und Signaturfeldern
+- sichtbare Koordinaten- und Größenbearbeitung für ausgewählte Felder
+- Import von PDF24-Formularbeschreibungen im JSON-Format
+- sichtbare Löschfunktion und synchronisierte Auswahl zwischen Feldliste und PDF
+
+### Changed
+
+- Template-Seiten werden beim Öffnen und bei Fenstergrößenänderungen automatisch eingepasst
+- der Template-Designer kann regulär maximiert und frei skaliert werden
+- die PDF-Arbeitsfläche hebt sich als dunkler, ruhiger Arbeitsbereich ab
+
 ## [1.0.0-rc.4] – 2026-07-30
 
 ### Added
