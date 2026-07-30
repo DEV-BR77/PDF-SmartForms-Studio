@@ -52,6 +52,25 @@ def test_flat_labels_include_mapped_and_missing_fields(tmp_path: Path) -> None:
     assert statuses["krankenkasse"] == MatchStatus.MISSING
 
 
+def test_small_footer_and_legal_prose_are_not_detected_as_fields(tmp_path: Path) -> None:
+    path = tmp_path / "footer.pdf"
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text((40, 80), "Vorname:", fontsize=11)
+    page.insert_text(
+        (40, 160),
+        "Datenschutz: Hinweise zum Datum und zur E-Mail finden Sie im Rechtstext.",
+        fontsize=7,
+    )
+    page.insert_text((40, 800), "E-Mail: footer@example.org", fontsize=6)
+    document.save(path)
+    document.close()
+
+    result = analyze_pdf(path)
+
+    assert [field.label.casefold() for field in result.fields] == ["vorname"]
+
+
 def test_label_matching_distinguishes_exact_uncertain_and_missing() -> None:
     assert match_label("Geburtsdatum")[1] == MatchStatus.MAPPED
     assert match_label("Geburtsdatm")[1] == MatchStatus.UNCERTAIN

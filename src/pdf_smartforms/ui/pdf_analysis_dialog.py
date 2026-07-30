@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import re
+import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QColor, QDesktopServices, QImage, QPen, QPixmap
+from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtGui import QColor, QDesktopServices, QImage, QPen, QPixmap, QResizeEvent
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -41,9 +41,12 @@ from pdf_smartforms.domain.distribution import PlacedSignature
 from pdf_smartforms.domain.field_dictionary import SOURCE_LABELS, AliasConflict
 from pdf_smartforms.domain.safety import SafetyReview
 from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
+from pdf_smartforms.infrastructure.temporary import temporary_workspace
 from pdf_smartforms.pdf.analyzer import analyze_pdf, render_page
+from pdf_smartforms.printing.service import PdfPrintError, print_pdf
 from pdf_smartforms.signatures.repository import SignatureRepository
 from pdf_smartforms.ui.safety_review_dialog import confirm_safety_review
+from pdf_smartforms.ui.signature_manager import SignatureManagerDialog
 
 _COLORS = {
     MatchStatus.MAPPED: QColor("#1f9d55"),
@@ -96,6 +99,29 @@ class SignatureOverlayItem(QGraphicsPixmapItem):
         event.accept()
 
 
+class FitGraphicsView(QGraphicsView):
+    """Keep the complete PDF page visible until the user zooms manually."""
+
+    def __init__(self, scene: QGraphicsScene, parent: QWidget | None = None) -> None:
+        super().__init__(scene, parent)
+        self.auto_fit = True
+
+    def fit_page(self) -> None:
+        self.auto_fit = True
+        self.resetTransform()
+        if not self.sceneRect().isEmpty():
+            self.fitInView(self.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+    def zoom(self, factor: float) -> None:
+        self.auto_fit = False
+        self.scale(factor, factor)
+
+    def resizeEvent(self, event: QResizeEvent | None) -> None:
+        super().resizeEvent(event)
+        if self.auto_fit:
+            QTimer.singleShot(0, self.fit_page)
+
+
 class PdfAnalysisDialog(QDialog):
     """Display a rendered PDF with non-printing field overlays."""
 
@@ -117,7 +143,8 @@ class PdfAnalysisDialog(QDialog):
         self.signature_placements: list[SignaturePlacementState] = []
         self.current_page = 0
         self.overlay_items: dict[str, QGraphicsRectItem] = {}
-        self.setWindowTitle(f"PDF analysieren · {self.analysis.title}")
+        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+        self.setWindowTitle(f"PDF analysieren · {self.communication.title}")
         self.resize(1180, 760)
         self._build_ui()
         self._populate_field_list()
@@ -128,16 +155,19 @@ class PdfAnalysisDialog(QDialog):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         top = QHBoxLayout()
-        title = QLabel(self.analysis.title)
+        title = QLabel(self.communication.title)
         title.setObjectName("title")
         top.addWidget(title)
         top.addStretch()
         zoom_out = QPushButton("−")
         zoom_out.setAccessibleName("Vorschau verkleinern")
-        zoom_out.clicked.connect(lambda: self.view.scale(1 / 1.15, 1 / 1.15))
+        zoom_out.clicked.connect(lambda: self.view.zoom(1 / 1.15))
         zoom_in = QPushButton("+")
         zoom_in.setAccessibleName("Vorschau vergrößern")
-        zoom_in.clicked.connect(lambda: self.view.scale(1.15, 1.15))
+        zoom_in.clicked.connect(lambda: self.view.zoom(1.15))
+        fit_page = QPushButton("Seite")
+        fit_page.setAccessibleName("Ganze PDF-Seite in die Vorschau einpassen")
+        fit_page.clicked.connect(lambda: self.view.fit_page())
         self.previous_button = QPushButton("←")
         self.previous_button.setAccessibleName("Vorherige Seite")
         self.previous_button.clicked.connect(self._previous_page)
@@ -148,6 +178,7 @@ class PdfAnalysisDialog(QDialog):
         for widget in (
             zoom_out,
             zoom_in,
+            fit_page,
             self.previous_button,
             self.page_label,
             self.next_button,
@@ -157,7 +188,7 @@ class PdfAnalysisDialog(QDialog):
 
         splitter = QSplitter()
         self.scene = QGraphicsScene(self)
-        self.view = QGraphicsView(self.scene)
+        self.view = FitGraphicsView(self.scene)
         self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         splitter.addWidget(self.view)
@@ -169,10 +200,12 @@ class PdfAnalysisDialog(QDialog):
         )
         side_layout.addWidget(legend)
         self.field_list = QListWidget()
+        self.field_list.setMinimumHeight(190)
         self.field_list.currentItemChanged.connect(self._focus_selected_field)
-        side_layout.addWidget(self.field_list)
+        side_layout.addWidget(self.field_list, 1)
         side_layout.addWidget(QLabel("Manuelle Zuordnung"))
         self.source_combo = QComboBox()
+        self.source_combo.addItem("Bitte Datenquelle auswählen", None)
         for source, label in sorted(SOURCE_LABELS.items(), key=lambda item: item[1]):
             self.source_combo.addItem(label, source)
         side_layout.addWidget(self.source_combo)
@@ -228,6 +261,9 @@ class PdfAnalysisDialog(QDialog):
         splitter.setSizes([820, 320])
         layout.addWidget(splitter)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close_button = buttons.button(QDialogButtonBox.StandardButton.Close)
+        if close_button is not None:
+            close_button.setText("Schließen")
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
@@ -279,6 +315,7 @@ class PdfAnalysisDialog(QDialog):
             self.overlay_items[field.id] = item
         self._render_signature_placements()
         self.scene.setSceneRect(0, 0, width, height)
+        QTimer.singleShot(0, self.view.fit_page)
         self.page_label.setText(f"Seite {page_number + 1} von {self.analysis.page_count}")
         self.previous_button.setEnabled(page_number > 0)
         self.next_button.setEnabled(page_number + 1 < self.analysis.page_count)
@@ -300,6 +337,8 @@ class PdfAnalysisDialog(QDialog):
             source_index = self.source_combo.findData(field.source)
             if source_index >= 0:
                 self.source_combo.setCurrentIndex(source_index)
+        else:
+            self.source_combo.setCurrentIndex(0)
         if field.page != self.current_page:
             self._show_page(field.page)
         overlay = self.overlay_items.get(field.id)
@@ -400,12 +439,15 @@ class PdfAnalysisDialog(QDialog):
             None,
         )
         if asset is None:
-            QMessageBox.information(
-                self,
-                "Keine Unterschrift",
-                "Bitte zuerst unter Unterschriften eine PNG- oder JPG-Datei importieren.",
+            SignatureManagerDialog(self.signature_repository, self).exec()
+            self._reload_signatures()
+            asset_id = self.signature_combo.currentData()
+            asset = next(
+                (item for item in self.signature_repository.list() if item.id == asset_id),
+                None,
             )
-            return
+            if asset is None:
+                return
         pixmap = QPixmap(str(self.signature_repository.image_path(asset)))
         if pixmap.isNull():
             QMessageBox.critical(
@@ -484,7 +526,7 @@ class PdfAnalysisDialog(QDialog):
         filename, _ = QFileDialog.getSaveFileName(
             self,
             "PDF-Arbeitskopie speichern",
-            f"{self.communication.title}.pdf",
+            str(self.pdf_path.with_name(f"{self.pdf_path.stem}_ausgefüllt.pdf")),
             "PDF-Dokumente (*.pdf)",
         )
         if not filename:
@@ -505,27 +547,30 @@ class PdfAnalysisDialog(QDialog):
     def _print_work_copy(self) -> None:
         if not confirm_safety_review(self._safety_review("PDF drucken"), self):
             return
-        target = self._export_to_selected_path()
-        if target is None:
-            return
-        startfile = getattr(os, "startfile", None)
-        if startfile is None:
-            QMessageBox.warning(
-                self,
-                "Drucken nicht verfügbar",
-                "Diese Funktion wird derzeit unter Windows unterstützt.",
-            )
-            return
         try:
-            startfile(str(target), "print")
-        except OSError as error:
+            temporary_root = Path(tempfile.gettempdir()) / "PDF-SmartForms-Studio"
+            with temporary_workspace(temporary_root) as workspace:
+                target = export_work_copy(
+                    self.pdf_path,
+                    workspace / "print.pdf",
+                    self._placed_signatures(),
+                )
+                printed = print_pdf(target, self)
+        except (OSError, ValueError, PdfPrintError) as error:
             QMessageBox.critical(self, "Drucken fehlgeschlagen", str(error))
+            return
+        if printed:
+            QMessageBox.information(
+                self,
+                "Druckauftrag erstellt",
+                "Das Dokument wurde an den ausgewählten Drucker übergeben.",
+            )
 
     def _create_email_draft(self) -> None:
         filename, _ = QFileDialog.getSaveFileName(
             self,
             "E-Mail-Entwurf speichern",
-            f"{self.communication.title}.eml",
+            str(self.pdf_path.with_name(f"{self.pdf_path.stem}_E-Mail.eml")),
             "E-Mail-Entwurf (*.eml)",
         )
         if not filename:
