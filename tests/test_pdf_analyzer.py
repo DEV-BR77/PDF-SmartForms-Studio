@@ -124,6 +124,25 @@ def test_date_field_type_is_inferred(tmp_path: Path) -> None:
     assert result.fields[0].type == TemplateFieldType.DATE
 
 
+def test_visible_yes_no_glyphs_are_detected_as_radio_fields(tmp_path: Path) -> None:
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text((40, 80), "Teilnahme an der Ausleihe:")
+    page.draw_rect(pymupdf.Rect(40, 95, 50, 105))
+    page.insert_text((55, 105), "Ja")
+    page.draw_rect(pymupdf.Rect(40, 115, 50, 125))
+    page.insert_text((55, 125), "Nein,")
+    path = tmp_path / "yes-no.pdf"
+    document.save(path)
+    document.close()
+
+    result = analyze_pdf(path)
+    choices = [field for field in result.fields if field.origin == "Gezeichnetes Auswahlfeld"]
+
+    assert len(choices) == 2
+    assert all(field.type == TemplateFieldType.RADIO for field in choices)
+
+
 def test_non_pdf_and_corrupt_pdf_are_rejected(tmp_path: Path) -> None:
     text = tmp_path / "document.txt"
     text.write_text("not a pdf", encoding="utf-8")
