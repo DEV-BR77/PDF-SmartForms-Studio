@@ -23,7 +23,11 @@ class FieldDictionaryRepository:
             self.save(dictionary)
             return dictionary
         payload = json.loads(self.path.read_text(encoding="utf-8"))
-        return FieldDictionary.from_dict(payload)
+        dictionary = FieldDictionary.from_dict(payload)
+        report = dictionary.merge(FieldDictionary.with_seed_data())
+        if report.added:
+            self.save(dictionary)
+        return dictionary
 
     def save(self, dictionary: FieldDictionary) -> None:
         temporary = self.path.with_suffix(".json.tmp")

@@ -10,8 +10,11 @@ für bis zu zwei erziehungsberechtigte Personen hinterlegt werden.
 3. Beim Import optional weißen Hintergrund entfernen und Kontrast verbessern.
 4. Ergebnis in der Vorschau kontrollieren.
 
-In der PDF-Vorschau lässt sich die Unterschrift mit der Maus verschieben und
-mit dem Mausrad proportional skalieren.
+Beim Einfügen wird die Unterschrift zunächst im erkannten Unterschriftsbereich
+platziert. Sie lässt sich in der PDF-Vorschau anklicken und mit der Maus
+verschieben. Der Größenregler unterhalb der Unterschriftenauswahl ändert die
+Größe unmittelbar. **Ausgewählte Unterschrift löschen** entfernt ein
+versehentlich oder mehrfach eingefügtes Bild.
 
 ## Wichtiger Hinweis
 

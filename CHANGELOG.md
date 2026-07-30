@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## [1.0.0-rc.4] – 2026-07-30
+
+### Added
+
+- Profilwahl direkt in der PDF-Analyse
+- sichtbare Profilwerte in der Vorschau und in gespeicherten, gedruckten und
+  per E-Mail vorbereiteten PDFs
+- Größenregler und Löschfunktion für die ausgewählte Bildunterschrift
+- anwendungsinterne Druckvorschau
+
+### Changed
+
+- Unterschriften werden zunächst automatisch im erkannten Unterschriftsbereich platziert
+- Tabellenlinien bestimmen die Feldrahmen statt pauschaler Breiten bis zum Seitenrand
+- der größte sichtbare Formulartitel ersetzt ungeeignete interne PDF-Metadaten
+- neue Standardbegriffe unterscheiden Teilnehmer- und Erziehungsberechtigtendaten
+
+### Fixed
+
+- lange Profilwerte wie E-Mail-Adressen werden passend skaliert und vollständig exportiert
+- Fußzeilen wie Datenschutz, Geschäftsführung und Kontaktdaten werden nicht als Felder markiert
+- aktualisierte Standardbegriffe werden in vorhandene lokale Feldlexika übernommen
+
 ## [1.0.0-rc.3] – 2026-07-30
 
 ### Added
