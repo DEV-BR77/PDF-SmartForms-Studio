@@ -12,11 +12,19 @@
 - Feldtyp, Position und Größe lassen sich im Analysefenster korrigieren.
 - Korrigierte Analysen können als wiederverwendbare lokale Vorlage gespeichert werden.
 - Die Feldliste zeigt Erkennungsart, Feldtyp und PDF-Koordinaten.
+- Dokumente werden über einen stabilen Fingerabdruck automatisch lokalen Vorlagen zugeordnet.
+- Anonyme Vorlagenbeiträge enthalten nur Feldschema, Koordinaten und Fingerabdruck.
+- Geprüfte Vorlagen können mit Releases ausgeliefert und beim Start installiert werden.
+- Beim Start wird optional und ohne Zugangsdaten nach neuen Katalogvorlagen gesucht.
+- Neue Vorlagen werden im Startfenster angezeigt und nur auf Wunsch installiert.
+- Vorlagen speichern Institution, Kategorie, Ort, Dokumentart, Zielgruppe,
+  Veröffentlichungsdatum, Gültigkeit und Schlagwörter.
 
 ### Changed
 
 - Nur das ausgewählte Feld wird standardmäßig umrahmt; alle Rahmen sind optional.
 - PDF24-JSON ist ein optionaler Import und keine Voraussetzung.
+- PDF24-Import ist nur in der separaten Maintainer-Version sichtbar.
 - Menüeinträge verzichten auf gequetschte Tastenkürzel.
 
 ## [1.0.0-rc.6] – 2026-07-30

@@ -37,6 +37,15 @@ def suggest_communication(path: Path) -> CommunicationSuggestion:
     )
 
 
+def suggest_publication_date(path: Path) -> str:
+    """Suggest, but never assert, a publication date from PDF metadata."""
+    with pymupdf.open(path) as document:  # type: ignore[no-untyped-call]
+        metadata: dict[str, Any] = document.metadata or {}
+    value = str(metadata.get("creationDate") or "")
+    match = re.match(r"D:(\d{4})(\d{2})(\d{2})", value)
+    return "-".join(match.groups()) if match else ""
+
+
 def _first_heading(text: str) -> str:
     for line in text.splitlines():
         candidate = " ".join(line.split()).strip()

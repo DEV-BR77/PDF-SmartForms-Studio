@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import tempfile
 from dataclasses import dataclass, replace
@@ -49,10 +50,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from pdf_smartforms.build_info import __version__
+from pdf_smartforms.build_info import MAINTAINER_MODE, __version__
 from pdf_smartforms.distribution.document_exporter import export_work_copy
 from pdf_smartforms.distribution.email_draft import create_email_draft
-from pdf_smartforms.distribution.metadata import suggest_communication
+from pdf_smartforms.distribution.metadata import (
+    suggest_communication,
+    suggest_publication_date,
+)
 from pdf_smartforms.domain.detection import AnalysisResult, DetectedField, MatchStatus
 from pdf_smartforms.domain.distribution import PlacedSignature, PlacedText
 from pdf_smartforms.domain.field_dictionary import SOURCE_LABELS, AliasConflict
@@ -68,6 +72,7 @@ from pdf_smartforms.domain.templates import (
 from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.infrastructure.temporary import temporary_workspace
 from pdf_smartforms.pdf.analyzer import analyze_pdf, render_page
+from pdf_smartforms.pdf.fingerprint import document_fingerprint
 from pdf_smartforms.printing.service import PdfPrintError, print_pdf
 from pdf_smartforms.profiles.repository import ProfileRepository
 from pdf_smartforms.profiles.values import profile_value
@@ -78,6 +83,7 @@ from pdf_smartforms.templates.repository import TemplateRepository
 from pdf_smartforms.ui.profile_editor import ProfileEditorDialog
 from pdf_smartforms.ui.safety_review_dialog import confirm_safety_review
 from pdf_smartforms.ui.signature_manager import SignatureManagerDialog
+from pdf_smartforms.ui.template_metadata_dialog import TemplateMetadataDialog
 
 _COLORS = {
     MatchStatus.MAPPED: QColor("#1f9d55"),
@@ -237,6 +243,8 @@ class PdfAnalysisDialog(QDialog):
         self.profile_repository = profile_repository
         self.template_repository = template_repository
         self.analysis = analyze_pdf(pdf_path, dictionary_repository.load())
+        self.document_fingerprint = document_fingerprint(pdf_path)
+        self.matched_template_name = self._apply_matching_template()
         self.communication = suggest_communication(pdf_path)
         self.signature_placements: list[SignaturePlacementState] = []
         self.current_page = 0
@@ -261,6 +269,10 @@ class PdfAnalysisDialog(QDialog):
         title = QLabel(self.communication.title)
         title.setObjectName("title")
         top.addWidget(title)
+        if self.matched_template_name:
+            matched = QLabel(f"✓ Vorlage erkannt: {self.matched_template_name}")
+            matched.setStyleSheet("color: #1f9d55; font-weight: 600;")
+            top.addWidget(matched)
         top.addStretch()
         zoom_out = QPushButton("−")
         zoom_out.setAccessibleName("Vorschau verkleinern")
@@ -377,13 +389,14 @@ class PdfAnalysisDialog(QDialog):
         remove_detection.clicked.connect(self._remove_selected_detection)
         side_layout.addWidget(remove_detection)
         dictionary_actions = QHBoxLayout()
-        import_pdf24 = QPushButton("PDF24-Felder")
-        import_pdf24.clicked.connect(self._import_pdf24_fields)
         import_dictionary = QPushButton("Lexikon importieren")
         import_dictionary.clicked.connect(self._import_dictionary)
         export_dictionary = QPushButton("Lexikon exportieren")
         export_dictionary.clicked.connect(self._export_dictionary)
-        dictionary_actions.addWidget(import_pdf24)
+        if MAINTAINER_MODE:
+            import_pdf24 = QPushButton("PDF24-Felder (Maintainer)")
+            import_pdf24.clicked.connect(self._import_pdf24_fields)
+            dictionary_actions.addWidget(import_pdf24)
         dictionary_actions.addWidget(import_dictionary)
         dictionary_actions.addWidget(export_dictionary)
         side_layout.addLayout(dictionary_actions)
@@ -476,6 +489,38 @@ class PdfAnalysisDialog(QDialog):
             f"{counts[MatchStatus.UNCERTAIN]} zu prüfen · "
             f"{counts[MatchStatus.MISSING]} nicht zugeordnet"
         )
+
+    def _apply_matching_template(self) -> str:
+        matches = [
+            template
+            for template in self.template_repository.list()
+            if template.document_fingerprint == self.document_fingerprint
+            and all(field.page < self.analysis.page_count for field in template.fields)
+        ]
+        if not matches:
+            return ""
+        template = sorted(matches, key=lambda item: item.version)[-1]
+        fields = tuple(
+            DetectedField(
+                id=field.id,
+                label=field.label,
+                type=field.type,
+                page=field.page,
+                rect=field.rect,
+                source=field.source or None,
+                status=MatchStatus.MAPPED if field.source else MatchStatus.MISSING,
+                confidence=1.0,
+                origin=f"Gespeicherte Vorlage {template.version}",
+            )
+            for field in template.fields
+        )
+        self.analysis = AnalysisResult(
+            self.analysis.title,
+            self.analysis.page_count,
+            fields,
+            self.analysis.warnings,
+        )
+        return template.name
 
     def _show_page(self, page_number: int) -> None:
         selected = self._selected_field()
@@ -763,6 +808,15 @@ class PdfAnalysisDialog(QDialog):
         )
         if not accepted or not name.strip():
             return
+        profile = self._selected_profile()
+        metadata_dialog = TemplateMetadataDialog(
+            institution_suggestion=self.communication.title,
+            city_suggestion=profile.city if profile is not None else "",
+            publication_suggestion=suggest_publication_date(self.pdf_path),
+            parent=self,
+        )
+        if metadata_dialog.exec() != QDialog.DialogCode.Accepted:
+            return
         template_id = re.sub(r"[^a-z0-9._-]+", "-", name.casefold()).strip("-")
         template_id = template_id or f"local-{uuid4().hex[:12]}"
         existing_versions = [
@@ -778,6 +832,8 @@ class PdfAnalysisDialog(QDialog):
             minimum_app_version=__version__,
             source_pdf=self.pdf_path.name,
             source_pdf_license="Lokale Benutzervorlage",
+            document_fingerprint=self.document_fingerprint,
+            metadata=metadata_dialog.metadata(),
             fields=[
                 TemplateField(
                     id=field.id,
@@ -813,6 +869,57 @@ class PdfAnalysisDialog(QDialog):
             f"Die korrigierten Felder sind jetzt als lokale Vorlage "
             f"„{template.name}“ ({template.version}) verfügbar.",
         )
+        share = QMessageBox.question(
+            self,
+            "Anonym zur Vorlagenbibliothek beitragen?",
+            "Darf die Feldvorlage der Allgemeinheit zur Verfügung gestellt werden?\n\n"
+            "Exportiert werden nur Feldnamen, Typen, Koordinaten, Zuordnungen und "
+            "der nicht umkehrbare Dokumentfingerabdruck. Profile, eingetragene "
+            "Werte, Unterschriften und das PDF selbst werden nicht übertragen.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if share == QMessageBox.StandardButton.Yes:
+            self._export_template_contribution(template)
+
+    def _export_template_contribution(self, template: Template) -> None:
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Anonymen Vorlagenbeitrag speichern",
+            str(self.pdf_path.with_name(f"{template.id}.psfs-contribution.json")),
+            "PDF SmartForms Vorlagenbeitrag (*.json)",
+        )
+        if not filename:
+            return
+        template_payload = template.to_dict()
+        template_payload["source_pdf"] = ""
+        template_payload["source_pdf_license"] = ""
+        payload = {
+            "format": "pdf-smartforms-template-contribution",
+            "format_version": "1.0",
+            "privacy": {
+                "contains_pdf": False,
+                "contains_profile_values": False,
+                "contains_signatures": False,
+            },
+            "template": template_payload,
+        }
+        Path(filename).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        open_archive = QMessageBox.question(
+            self,
+            "Beitrag erstellt",
+            "Der anonyme Vorlagenbeitrag wurde gespeichert.\n\n"
+            "Jetzt das Vorlagenarchiv öffnen, um ihn zur Prüfung einzureichen?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if open_archive == QMessageBox.StandardButton.Yes:
+            QDesktopServices.openUrl(
+                QUrl("https://github.com/DEV-BR77/PDF-SmartForms-Templates/issues/new")
+            )
 
     def _apply_manual_mapping(self) -> None:
         field = self._selected_field()

@@ -12,6 +12,8 @@ New-Item -ItemType Directory -Force "$packageRoot\\docs" | Out-Null
 Copy-Item "README.md", "LICENSE.md", "PRIVACY.md", "SECURITY.md" $packageRoot
 Copy-Item -Recurse "docs\\user-guide" "$packageRoot\\docs\\user-guide"
 Copy-Item -Recurse "docs\\screenshots" "$packageRoot\\docs\\screenshots"
+New-Item -ItemType Directory -Force "$packageRoot\\templates" | Out-Null
+Copy-Item "assets\\templates\\*.psfstemplate" "$packageRoot\\templates" -ErrorAction SilentlyContinue
 python scripts/package_release.py
 
 Write-Host "Releasepaket erstellt: release\\"

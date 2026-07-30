@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from enum import StrEnum
 from typing import Any
 
@@ -83,6 +83,36 @@ class TemplateField:
 
 
 @dataclass(slots=True)
+class TemplateMetadata:
+    """Search and catalog metadata confirmed by a template author."""
+
+    institution_name: str = ""
+    institution_category: str = ""
+    institution_type: str = ""
+    institution_subtype: str = ""
+    country: str = ""
+    state: str = ""
+    city: str = ""
+    geographic_scope: str = ""
+    document_type: str = ""
+    target_group: str = ""
+    document_published_at: str = ""
+    valid_from: str = ""
+    valid_until: str = ""
+    template_created_at: str = ""
+    template_updated_at: str = ""
+    template_verified_at: str = ""
+    keywords: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> TemplateMetadata:
+        known = {item.name for item in fields(cls)}
+        values = {key: value for key, value in payload.items() if key in known}
+        values["keywords"] = tuple(str(item) for item in payload.get("keywords", ()))
+        return cls(**values)
+
+
+@dataclass(slots=True)
 class Template:
     """Versioned description of a reusable PDF form."""
 
@@ -94,6 +124,8 @@ class Template:
     minimum_app_version: str
     source_pdf: str
     source_pdf_license: str = ""
+    document_fingerprint: str = ""
+    metadata: TemplateMetadata = field(default_factory=TemplateMetadata)
     fields: list[TemplateField] = field(default_factory=list)
 
     def validate(self) -> dict[str, str]:
@@ -107,8 +139,10 @@ class Template:
             errors["name"] = "Template-Name fehlt."
         if not self.version.strip():
             errors["version"] = "Template-Version fehlt."
-        if not self.source_pdf.lower().endswith(".pdf"):
-            errors["source_pdf"] = "Ein PDF als Quelldokument fehlt."
+        if self.source_pdf and not self.source_pdf.lower().endswith(".pdf"):
+            errors["source_pdf"] = "Das Quelldokument muss ein PDF sein."
+        if not self.source_pdf and not self.document_fingerprint:
+            errors["source_pdf"] = "Quelldokument oder Dokumentfingerabdruck fehlt."
         field_ids = [item.id for item in self.fields]
         if len(field_ids) != len(set(field_ids)):
             errors["fields"] = "Feld-IDs müssen eindeutig sein."
@@ -152,5 +186,7 @@ class Template:
             minimum_app_version=str(payload["minimum_app_version"]),
             source_pdf=str(payload["source_pdf"]),
             source_pdf_license=str(payload.get("source_pdf_license", "")),
+            document_fingerprint=str(payload.get("document_fingerprint", "")),
+            metadata=TemplateMetadata.from_dict(dict(payload.get("metadata", {}))),
             fields=fields,
         )

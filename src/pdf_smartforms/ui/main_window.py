@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import sys
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QKeyEvent
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QCloseEvent, QKeyEvent
 from PyQt6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -31,6 +34,7 @@ from pdf_smartforms.field_dictionary.repository import FieldDictionaryRepository
 from pdf_smartforms.infrastructure.paths import AppPaths
 from pdf_smartforms.profiles.repository import ProfileRepository
 from pdf_smartforms.signatures.repository import SignatureRepository
+from pdf_smartforms.templates.catalog import CatalogEntry, TemplateCatalogClient
 from pdf_smartforms.templates.repository import TemplateRepository
 from pdf_smartforms.ui.about_dialog import AboutDialog
 from pdf_smartforms.ui.backup_manager import BackupManagerDialog
@@ -47,6 +51,7 @@ class WelcomePage(QWidget):
 
     own_pdf_requested = pyqtSignal()
     package_requested = pyqtSignal()
+    template_update_requested = pyqtSignal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -82,6 +87,19 @@ class WelcomePage(QWidget):
         actions.addWidget(own_pdf)
         actions.addWidget(package)
         card_layout.addLayout(actions)
+        self.template_update_frame = QFrame()
+        self.template_update_frame.setStyleSheet(
+            "QFrame { background: #eef4ff; border: 1px solid #b8cdf7; "
+            "border-radius: 8px; padding: 8px; }"
+        )
+        update_layout = QHBoxLayout(self.template_update_frame)
+        self.template_update_label = QLabel()
+        self.template_update_button = QPushButton("Vorlagen aktualisieren")
+        self.template_update_button.clicked.connect(self.template_update_requested)
+        update_layout.addWidget(self.template_update_label, 1)
+        update_layout.addWidget(self.template_update_button)
+        self.template_update_frame.hide()
+        card_layout.addWidget(self.template_update_frame)
         privacy = QLabel(
             "Es wird nichts automatisch versendet. Vor Export oder E-Mail "
             "erscheint später immer eine Sicherheitsvorschau."
@@ -92,6 +110,18 @@ class WelcomePage(QWidget):
         outer.addWidget(card)
         outer.addStretch()
 
+    def show_template_updates(self, count: int) -> None:
+        self.template_update_label.setText(
+            f"{count} neue Vorlage{'n' if count != 1 else ''} verfügbar"
+        )
+        self.template_update_button.setText("Vorlagen aktualisieren")
+        self.template_update_button.setEnabled(True)
+        self.template_update_frame.show()
+
+    def show_template_update_progress(self) -> None:
+        self.template_update_label.setText("Vorlagen werden sicher geprüft und installiert …")
+        self.template_update_button.setEnabled(False)
+
 
 class MainWindow(QMainWindow):
     """Application shell for the foundation milestone."""
@@ -101,20 +131,91 @@ class MainWindow(QMainWindow):
         self.paths = paths
         self.profile_repository = ProfileRepository(paths.profiles)
         self.template_repository = TemplateRepository(paths.templates)
+        self.template_repository.install_bundled(_bundled_template_directory())
         self.dictionary_repository = FieldDictionaryRepository(paths.field_dictionary)
         self.signature_repository = SignatureRepository(paths.signatures)
         self.distribution_repository = DistributionListRepository(paths.distribution_lists)
+        self.catalog_client = TemplateCatalogClient()
+        self.catalog_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="template-catalog",
+        )
+        self.catalog_future: Future[Any] | None = None
+        self.available_catalog_entries: list[CatalogEntry] = []
         self.setWindowTitle(f"{APP_NAME} · {__version__}")
         self.resize(980, 640)
         self.setMinimumSize(760, 520)
-        page = WelcomePage()
-        page.own_pdf_requested.connect(self._select_pdf)
-        page.package_requested.connect(self._import_received_package)
-        self.setCentralWidget(page)
+        self.welcome_page = WelcomePage()
+        self.welcome_page.own_pdf_requested.connect(self._select_pdf)
+        self.welcome_page.package_requested.connect(self._import_received_package)
+        self.welcome_page.template_update_requested.connect(self._install_template_updates)
+        self.setCentralWidget(self.welcome_page)
         self._build_menu()
         status_bar = QStatusBar(self)
         self.setStatusBar(status_bar)
         status_bar.showMessage("Bereit · lokale Verarbeitung")
+        QTimer.singleShot(700, self._check_template_updates)
+
+    def _check_template_updates(self) -> None:
+        if self.catalog_future is not None:
+            return
+        self.catalog_future = self.catalog_executor.submit(
+            self.catalog_client.available_updates,
+            self.template_repository,
+        )
+        QTimer.singleShot(100, self._poll_catalog_check)
+
+    def _poll_catalog_check(self) -> None:
+        future = self.catalog_future
+        if future is None:
+            return
+        if not future.done():
+            QTimer.singleShot(100, self._poll_catalog_check)
+            return
+        self.catalog_future = None
+        try:
+            entries = future.result()
+        except ValueError:
+            return
+        if not isinstance(entries, list):
+            return
+        self.available_catalog_entries = entries
+        if entries:
+            self.welcome_page.show_template_updates(len(entries))
+
+    def _install_template_updates(self) -> None:
+        if self.catalog_future is not None or not self.available_catalog_entries:
+            return
+        entries = list(self.available_catalog_entries)
+        self.welcome_page.show_template_update_progress()
+        self.catalog_future = self.catalog_executor.submit(
+            self.catalog_client.install_updates,
+            entries,
+            self.template_repository,
+        )
+        QTimer.singleShot(100, self._poll_catalog_install)
+
+    def _poll_catalog_install(self) -> None:
+        future = self.catalog_future
+        if future is None:
+            return
+        if not future.done():
+            QTimer.singleShot(100, self._poll_catalog_install)
+            return
+        self.catalog_future = None
+        try:
+            installed = int(future.result())
+        except (OSError, ValueError) as error:
+            self.welcome_page.show_template_updates(len(self.available_catalog_entries))
+            QMessageBox.warning(self, "Vorlagen nicht aktualisiert", str(error))
+            return
+        self.available_catalog_entries.clear()
+        self.welcome_page.template_update_frame.hide()
+        QMessageBox.information(
+            self,
+            "Vorlagen aktualisiert",
+            f"{installed} neue Vorlage{'n' if installed != 1 else ''} installiert.",
+        )
 
     def _build_menu(self) -> None:
         menu_bar = QMenuBar(self)
@@ -253,3 +354,13 @@ class MainWindow(QMainWindow):
             self._show_about()
             return
         super().keyPressEvent(event)
+
+    def closeEvent(self, event: QCloseEvent | None) -> None:
+        self.catalog_executor.shutdown(wait=False, cancel_futures=True)
+        super().closeEvent(event)
+
+
+def _bundled_template_directory() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "templates"
+    return Path(__file__).resolve().parents[3] / "assets" / "templates"
