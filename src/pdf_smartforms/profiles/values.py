@@ -11,6 +11,9 @@ def profile_value(profile: Profile | None, source: str | None, label: str = "") 
     values = {
         "participant.first_name": profile.participant_first_name,
         "participant.last_name": profile.participant_last_name,
+        "participant.name": (
+            f"{profile.participant_first_name} {profile.participant_last_name}".strip()
+        ),
         "participant.birth_date": (
             profile.birth_date.strftime("%d.%m.%Y") if profile.birth_date else ""
         ),
@@ -18,13 +21,19 @@ def profile_value(profile: Profile | None, source: str | None, label: str = "") 
         "address.postal_code": profile.postal_code,
         "address.city": profile.city,
         "contact.phone": profile.phone,
+        "contact.mobile": profile.mobile,
         "contact.email": profile.email,
         "guardian.1.first_name": profile.guardian_1.first_name,
         "guardian.1.last_name": profile.guardian_1.last_name,
+        "guardian.1.name": (
+            f"{profile.guardian_1.first_name} {profile.guardian_1.last_name}".strip()
+        ),
         "signature.place": profile.city,
     }
     for custom in profile.custom_fields:
         values[custom.key] = custom.value
+        if not custom.key.startswith("custom."):
+            values[f"custom.{custom.key}"] = custom.value
     if "plz" in label.casefold() and "ort" in label.casefold():
         return f"{profile.postal_code} {profile.city}".strip()
     return values.get(source, "").strip()

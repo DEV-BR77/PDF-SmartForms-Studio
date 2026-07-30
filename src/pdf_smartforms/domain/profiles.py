@@ -52,6 +52,7 @@ class Profile:
     postal_code: str = ""
     city: str = ""
     phone: str = ""
+    mobile: str = ""
     email: str = ""
     guardian_1: Guardian = field(default_factory=Guardian)
     guardian_2: Guardian = field(default_factory=Guardian)
@@ -119,6 +120,7 @@ class Profile:
             postal_code=str(payload.get("postal_code", "")),
             city=str(payload.get("city", "")),
             phone=str(payload.get("phone", "")),
+            mobile=str(payload.get("mobile", "")),
             email=str(payload.get("email", "")),
             guardian_1=Guardian(**payload.get("guardian_1", {})),
             guardian_2=Guardian(**payload.get("guardian_2", {})),

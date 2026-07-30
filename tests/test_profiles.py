@@ -15,6 +15,8 @@ def test_profile_round_trip_preserves_flexible_fields() -> None:
         participant_last_name="Beispiel",
         birth_date=date(2015, 11, 8),
         city="Wolfsburg",
+        phone="05361 1234",
+        mobile="0179 1234",
         guardian_1=Guardian(first_name="Melanie", last_name="Beispiel"),
         custom_fields=[
             CustomField(
@@ -28,6 +30,8 @@ def test_profile_round_trip_preserves_flexible_fields() -> None:
     restored = Profile.from_dict(profile.to_dict())
     assert restored == profile
     assert restored.custom_fields[0].sensitivity == FieldSensitivity.SENSITIVE
+    assert restored.phone == "05361 1234"
+    assert restored.mobile == "0179 1234"
 
 
 def test_profile_requires_participant_name() -> None:

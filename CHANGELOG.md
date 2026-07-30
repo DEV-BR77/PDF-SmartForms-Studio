@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## [1.0.0-rc.6] – 2026-07-30
+
+### Added
+
+- eigenständige linke Feldspalte in der PDF-Analyse
+- blauer Fokusrahmen für das aktuell ausgewählte Feld
+- direktes Anlegen und Befüllen neuer Profilfelder aus einem erkannten PDF-Feld
+- dynamische Datenquellen aus importiertem Feldlexikon und ausgewähltem Profil
+- getrennte Profilwerte für Festnetz und Mobiltelefon
+
+### Changed
+
+- Einstellungen stehen in einer eigenen, scrollbareren rechten Spalte
+- Lexikonkonflikte können nach ausdrücklicher Bestätigung ersetzt werden
+- ältere Quelle `contact.mobil` wird automatisch zu `contact.mobile` migriert
+- vollständige Namen von Teilnehmenden und Erziehungsberechtigten können als
+  zusammengesetzte Datenquelle verwendet werden
+
+### Fixed
+
+- neue Quellen aus importierten Lexikondateien fehlen nicht mehr in der Zuordnungsliste
+- „mobil“ und „handynummer“ bleiben nicht mehr fälschlich dem Festnetz zugeordnet
+
 ## [1.0.0-rc.5] – 2026-07-30
 
 ### Added
