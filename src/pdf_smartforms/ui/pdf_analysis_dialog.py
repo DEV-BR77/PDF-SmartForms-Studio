@@ -7,8 +7,16 @@ import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, QUrl
-from PyQt6.QtGui import QColor, QDesktopServices, QImage, QPen, QPixmap, QResizeEvent
+from PyQt6.QtCore import QRectF, Qt, QTimer, QUrl
+from PyQt6.QtGui import (
+    QColor,
+    QDesktopServices,
+    QImage,
+    QPen,
+    QPixmap,
+    QResizeEvent,
+    QShowEvent,
+)
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -33,6 +41,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from pdf_smartforms.build_info import __version__
 from pdf_smartforms.distribution.document_exporter import export_work_copy
 from pdf_smartforms.distribution.email_draft import create_email_draft
 from pdf_smartforms.distribution.metadata import suggest_communication
@@ -105,12 +114,18 @@ class FitGraphicsView(QGraphicsView):
     def __init__(self, scene: QGraphicsScene, parent: QWidget | None = None) -> None:
         super().__init__(scene, parent)
         self.auto_fit = True
+        self.page_rect = QRectF()
 
     def fit_page(self) -> None:
         self.auto_fit = True
         self.resetTransform()
-        if not self.sceneRect().isEmpty():
-            self.fitInView(self.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        if not self.page_rect.isEmpty():
+            self.fitInView(self.page_rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+    def set_page_rect(self, rect: QRectF) -> None:
+        self.page_rect = rect
+        self.setSceneRect(rect)
+        QTimer.singleShot(0, self.fit_page)
 
     def zoom(self, factor: float) -> None:
         self.auto_fit = False
@@ -120,6 +135,10 @@ class FitGraphicsView(QGraphicsView):
         super().resizeEvent(event)
         if self.auto_fit:
             QTimer.singleShot(0, self.fit_page)
+
+    def showEvent(self, event: QShowEvent | None) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self.fit_page)
 
 
 class PdfAnalysisDialog(QDialog):
@@ -143,8 +162,12 @@ class PdfAnalysisDialog(QDialog):
         self.signature_placements: list[SignaturePlacementState] = []
         self.current_page = 0
         self.overlay_items: dict[str, QGraphicsRectItem] = {}
-        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
-        self.setWindowTitle(f"PDF analysieren · {self.communication.title}")
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowMinMaxButtonsHint
+            | Qt.WindowType.WindowCloseButtonHint
+        )
+        self.setWindowTitle(f"PDF analysieren · {self.communication.title} · Version {__version__}")
         self.resize(1180, 760)
         self._build_ui()
         self._populate_field_list()
@@ -216,6 +239,12 @@ class PdfAnalysisDialog(QDialog):
         apply_mapping.setObjectName("primary")
         apply_mapping.clicked.connect(self._apply_manual_mapping)
         side_layout.addWidget(apply_mapping)
+        remove_detection = QPushButton("Erkennung entfernen")
+        remove_detection.setToolTip(
+            "Den markierten Vorschlag nur aus dieser Dokumentanalyse entfernen"
+        )
+        remove_detection.clicked.connect(self._remove_selected_detection)
+        side_layout.addWidget(remove_detection)
         dictionary_actions = QHBoxLayout()
         import_dictionary = QPushButton("Lexikon importieren")
         import_dictionary.clicked.connect(self._import_dictionary)
@@ -314,8 +343,7 @@ class PdfAnalysisDialog(QDialog):
             )
             self.overlay_items[field.id] = item
         self._render_signature_placements()
-        self.scene.setSceneRect(0, 0, width, height)
-        QTimer.singleShot(0, self.view.fit_page)
+        self.view.set_page_rect(QRectF(0, 0, width, height))
         self.page_label.setText(f"Seite {page_number + 1} von {self.analysis.page_count}")
         self.previous_button.setEnabled(page_number > 0)
         self.next_button.setEnabled(page_number + 1 < self.analysis.page_count)
@@ -378,6 +406,34 @@ class PdfAnalysisDialog(QDialog):
             self.analysis.title,
             self.analysis.page_count,
             fields,
+            self.analysis.warnings,
+        )
+        self._populate_field_list()
+        self._show_page(self.current_page)
+
+    def _remove_selected_detection(self) -> None:
+        field = self._selected_field()
+        if field is None:
+            QMessageBox.information(
+                self,
+                "Erkennung auswählen",
+                "Bitte zuerst den Vorschlag auswählen, der kein Formularfeld ist.",
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Erkennung entfernen",
+            f"„{field.label}“ aus dieser Dokumentanalyse entfernen?\n\n"
+            "Beim erneuten Öffnen des PDFs wird die Analyse neu durchgeführt.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.analysis = AnalysisResult(
+            self.analysis.title,
+            self.analysis.page_count,
+            tuple(item for item in self.analysis.fields if item.id != field.id),
             self.analysis.warnings,
         )
         self._populate_field_list()
