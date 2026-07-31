@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## [1.0.0-rc.10] – 2026-07-31
+
+### Added
+
+- Erstellungsdatum in der Templateübersicht.
+- Direkte Platzierung einer hinterlegten Bildunterschrift in ein ausgewähltes
+  Unterschriftsbild-Feld.
+- Einheitlicher Dialog zum Anlegen neuer Profil- oder Formularfelder.
+- Sichtbarer Löschknopf für falsch erkannte oder nicht benötigte Felder.
+
+### Changed
+
+- Feldrahmen können nun auch im normalen Analysefenster mit der Maus verschoben
+  und am rechten unteren Griff skaliert werden.
+- Unterschriftsvorschau in der Verwaltung ist kompakter.
+- Die wiederholte Hinweismeldung vor dem Aufziehen eines Feldes wurde durch
+  einen Hinweis im Fenster ersetzt.
+- Absender-Datenquellen wurden vereinheitlicht und veraltete Dubletten entfernt.
+
+### Fixed
+
+- Zertifikatssignatur und eingefügtes Unterschriftsbild werden verständlich
+  unterschieden.
+- Alte Schreibweisen von Absender-Homepage und Absender-E-Mail werden auf die
+  einheitlichen Formularfelder migriert.
+
 ## [1.0.0-rc.9] – 2026-07-31
 
 ### Added

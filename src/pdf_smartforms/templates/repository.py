@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 from pdf_smartforms.domain.templates import Template
@@ -80,6 +81,16 @@ class TemplateRepository:
             return None
         candidate = self._version_directory(template) / template.source_pdf
         return candidate if candidate.is_file() else None
+
+    def created_date(self, template: Template) -> str:
+        """Return metadata date, falling back to the local manifest timestamp."""
+        metadata_date = template.metadata.template_created_at[:10]
+        if metadata_date:
+            return metadata_date
+        manifest = self._version_directory(template) / "template.json"
+        if not manifest.is_file():
+            return "–"
+        return datetime.fromtimestamp(manifest.stat().st_mtime).date().isoformat()
 
     def _version_directory(self, template: Template) -> Path:
         errors = template.validate()
