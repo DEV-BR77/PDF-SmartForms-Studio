@@ -94,6 +94,7 @@ class SignatureManagerDialog(QDialog):
             for column, value in enumerate(values):
                 self.table.setItem(row, column, QTableWidgetItem(value))
             preview = QPushButton("Anzeigen")
+            preview.setFixedSize(78, 28)
             preview.setAccessibleName(f"Vorschau der Unterschrift {asset.name}")
             preview.clicked.connect(
                 lambda _checked=False, selected=asset: self._preview_asset(selected)

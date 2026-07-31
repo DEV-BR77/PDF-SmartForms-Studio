@@ -34,6 +34,8 @@ from PyQt6.QtWidgets import (
     QGraphicsPixmapItem,
     QGraphicsRectItem,
     QGraphicsScene,
+    QGraphicsSceneHoverEvent,
+    QGraphicsSceneMouseEvent,
     QGraphicsSceneWheelEvent,
     QGraphicsView,
     QHBoxLayout,
@@ -95,8 +97,16 @@ _FORM_SOURCE_LABELS = {
     "form.sender_name": "Absender – Name",
     "form.sender_email": "Absender – E-Mail-Adresse",
     "form.sender_homepage": "Absender – Homepage",
-    "form.recipient_name": "Empfänger – Name",
     "form.document_reference": "Dokument-/Vorgangsnummer",
+}
+_FORM_SOURCE_MIGRATIONS = {
+    "form.absender_name": "form.sender_name",
+    "form.absender_email": "form.sender_email",
+    "form.absender_e_mail": "form.sender_email",
+    "form.absender_homepage": "form.sender_homepage",
+    "form.absender_hompage": "form.sender_homepage",
+    "form.recipient_name": "",
+    "form.empfaenger_name": "",
 }
 
 
@@ -142,6 +152,85 @@ class SignatureOverlayItem(QGraphicsPixmapItem):
         self.state.scale = min(3.0, max(0.05, self.state.scale * factor))
         self.setScale(self.state.scale)
         event.accept()
+
+
+class EditableFieldOverlayItem(QGraphicsRectItem):
+    """A field frame that can be moved and resized directly on the PDF."""
+
+    _HANDLE_SIZE = 12.0
+
+    def __init__(self, field_id: str, rectangle: QRectF, changed: object) -> None:
+        super().__init__(0, 0, rectangle.width(), rectangle.height())
+        self.field_id = field_id
+        self.changed = changed
+        self.resizing = False
+        self.setPos(rectangle.topLeft())
+        self.setAcceptHoverEvents(True)
+        self.setFlags(
+            QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+            | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
+            | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
+        )
+        self.setData(0, field_id)
+
+    def _is_resize_handle(self, point: QPointF) -> bool:
+        rect = self.rect()
+        return (
+            point.x() >= rect.right() - self._HANDLE_SIZE
+            and point.y() >= rect.bottom() - self._HANDLE_SIZE
+        )
+
+    def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent | None) -> None:
+        if event is not None:
+            self.setCursor(
+                Qt.CursorShape.SizeFDiagCursor
+                if self._is_resize_handle(event.pos())
+                else Qt.CursorShape.SizeAllCursor
+            )
+        super().hoverMoveEvent(event)
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent | None) -> None:
+        if event is not None and self._is_resize_handle(event.pos()):
+            self.resizing = True
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent | None) -> None:
+        if event is not None and self.resizing:
+            point = event.pos()
+            self.setRect(0, 0, max(8.0, point.x()), max(8.0, point.y()))
+            self._notify_changed()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent | None) -> None:
+        if self.resizing:
+            self.resizing = False
+            self._notify_changed()
+            if event is not None:
+                event.accept()
+            return
+        super().mouseReleaseEvent(event)
+        self._notify_changed()
+
+    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value: object) -> object:
+        result = super().itemChange(change, value)
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            self._notify_changed()
+        return result
+
+    def _notify_changed(self) -> None:
+        if callable(self.changed):
+            rect = self.rect()
+            self.changed(
+                self.field_id,
+                self.pos().x(),
+                self.pos().y(),
+                rect.width(),
+                rect.height(),
+            )
 
 
 class FitGraphicsView(QGraphicsView):
@@ -346,6 +435,9 @@ class PdfAnalysisDialog(QDialog):
         add_field = QPushButton("Neues Feld hinzufügen")
         add_field.clicked.connect(self._begin_manual_field)
         field_layout.addWidget(add_field)
+        delete_field = QPushButton("Ausgewähltes Feld löschen")
+        delete_field.clicked.connect(self._remove_selected_detection)
+        field_layout.addWidget(delete_field)
         self.show_all_frames = QCheckBox("Alle Feldrahmen anzeigen")
         self.show_all_frames.setChecked(False)
         self.show_all_frames.toggled.connect(self._update_overlay_visibility)
@@ -424,15 +516,12 @@ class PdfAnalysisDialog(QDialog):
         apply_geometry = QPushButton("Position und Größe übernehmen")
         apply_geometry.clicked.connect(self._apply_selected_geometry)
         side_layout.addWidget(apply_geometry)
-        create_profile_field = QPushButton("Neues Profilfeld für diese Angabe")
-        create_profile_field.clicked.connect(self._create_custom_profile_field)
-        side_layout.addWidget(create_profile_field)
-        create_runtime_field = QPushButton("Als Formularangabe übernehmen")
-        create_runtime_field.setToolTip(
-            "Speichert Frage und Auswahl nur in der Vorlage, nicht als persönliche Profilangabe"
+        create_source_field = QPushButton("Neues Datenfeld anlegen")
+        create_source_field.setToolTip(
+            "Legt abhängig von der Auswahl ein Profil- oder Formularfeld an"
         )
-        create_runtime_field.clicked.connect(self._apply_form_mapping)
-        side_layout.addWidget(create_runtime_field)
+        create_source_field.clicked.connect(self._create_source_field)
+        side_layout.addWidget(create_source_field)
         self.learn_alias = QCheckBox("Diese Zuordnung künftig lokal erkennen")
         self.learn_alias.setChecked(True)
         side_layout.addWidget(self.learn_alias)
@@ -468,7 +557,10 @@ class PdfAnalysisDialog(QDialog):
         self.signature_combo = QComboBox()
         self._reload_signatures()
         side_layout.addWidget(self.signature_combo)
-        add_signature = QPushButton("Unterschrift auf Seite einfügen")
+        place_signature = QPushButton("Unterschrift in ausgewähltes Feld einsetzen")
+        place_signature.clicked.connect(self._place_signature_in_selected_field)
+        side_layout.addWidget(place_signature)
+        add_signature = QPushButton("Unterschrift frei auf Seite einfügen")
         add_signature.clicked.connect(self._add_signature)
         side_layout.addWidget(add_signature)
         self.signature_scale = QSlider(Qt.Orientation.Horizontal)
@@ -597,8 +689,12 @@ class PdfAnalysisDialog(QDialog):
                 type=field.type,
                 page=field.page,
                 rect=field.rect,
-                source=field.source or None,
-                status=MatchStatus.MAPPED if field.source else MatchStatus.MISSING,
+                source=self._canonical_form_source(field.source) or None,
+                status=(
+                    MatchStatus.MAPPED
+                    if self._canonical_form_source(field.source)
+                    else MatchStatus.MISSING
+                ),
                 confidence=1.0,
                 origin=f"Gespeicherte Vorlage {template.version}",
                 option_value=field.option_value,
@@ -616,6 +712,10 @@ class PdfAnalysisDialog(QDialog):
         )
         return template.name
 
+    @staticmethod
+    def _canonical_form_source(source: str) -> str:
+        return _FORM_SOURCE_MIGRATIONS.get(source, source)
+
     def _show_page(self, page_number: int) -> None:
         selected = self._selected_field()
         selected_id = selected.id if selected is not None else ""
@@ -630,16 +730,18 @@ class PdfAnalysisDialog(QDialog):
             if field.page != page_number:
                 continue
             rect = field.rect
-            item = self.scene.addRect(
-                rect.x0 * self.SCALE,
-                rect.y0 * self.SCALE,
-                rect.width * self.SCALE,
-                rect.height * self.SCALE,
-                QPen(_COLORS[field.status], 1),
+            item = EditableFieldOverlayItem(
+                field.id,
+                QRectF(
+                    rect.x0 * self.SCALE,
+                    rect.y0 * self.SCALE,
+                    rect.width * self.SCALE,
+                    rect.height * self.SCALE,
+                ),
+                self._overlay_geometry_changed,
             )
-            assert item is not None
-            item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
-            item.setData(0, field.id)
+            item.setPen(QPen(_COLORS[field.status], 1))
+            self.scene.addItem(item)
             item.setVisible(self.show_all_frames.isChecked() or field.id == selected_id)
             item.setToolTip(
                 f"{field.status_label}\n{field.label}\n"
@@ -665,6 +767,40 @@ class PdfAnalysisDialog(QDialog):
         self.page_label.setText(f"Seite {page_number + 1} von {self.analysis.page_count}")
         self.previous_button.setEnabled(page_number > 0)
         self.next_button.setEnabled(page_number + 1 < self.analysis.page_count)
+
+    def _overlay_geometry_changed(
+        self,
+        field_id: str,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+    ) -> None:
+        field = self._field_by_id(field_id)
+        if field is None:
+            return
+        updated = replace(
+            field,
+            rect=Rect(
+                x / self.SCALE,
+                y / self.SCALE,
+                (x + width) / self.SCALE,
+                (y + height) / self.SCALE,
+            ),
+            origin=f"{field.origin} · Position manuell korrigiert",
+        )
+        self.analysis = AnalysisResult(
+            self.analysis.title,
+            self.analysis.page_count,
+            tuple(updated if item.id == field_id else item for item in self.analysis.fields),
+            self.analysis.warnings,
+        )
+        selected = self._selected_field()
+        if selected is not None and selected.id == field_id:
+            self.detected_x.setValue(updated.rect.x0)
+            self.detected_y.setValue(updated.rect.y0)
+            self.detected_width.setValue(updated.rect.width)
+            self.detected_height.setValue(updated.rect.height)
 
     def _field_by_id(self, field_id: str) -> DetectedField | None:
         return next((field for field in self.analysis.fields if field.id == field_id), None)
@@ -806,17 +942,16 @@ class PdfAnalysisDialog(QDialog):
 
     def _begin_manual_field(self) -> None:
         self.view.begin_field_draw()
-        QMessageBox.information(
-            self,
-            "Feld aufziehen",
-            "Ziehe jetzt mit gedrückter linker Maustaste einen Rahmen auf der PDF-Seite auf.",
+        self.summary.setText(
+            "Neues Feld: Ziehe jetzt mit gedrückter linker Maustaste "
+            "einen Rahmen auf der PDF-Seite auf."
         )
 
     def _create_manual_field(self, rectangle: QRectF) -> None:
         label, accepted = QInputDialog.getText(
             self,
             "Neues Formularfeld",
-            "Welche Angabe gehört in dieses Feld?",
+            "Bezeichnung des neuen Feldes:",
         )
         if not accepted or not label.strip():
             return
@@ -1100,6 +1235,14 @@ class PdfAnalysisDialog(QDialog):
                 self, "Feld auswählen", "Bitte zuerst ein erkanntes Feld auswählen."
             )
             return
+        source = self._canonical_form_source(source)
+        if not source:
+            QMessageBox.information(
+                self,
+                "Datenquelle veraltet",
+                "Diese alte Datenquelle wurde entfernt. Bitte eine aktuelle Quelle auswählen.",
+            )
+            return
         if self.learn_alias.isChecked() and not source.startswith("form."):
             try:
                 self.dictionary_repository.learn(field.label, source)
@@ -1315,10 +1458,11 @@ class PdfAnalysisDialog(QDialog):
         if scope == "form":
             sources = set(_FORM_SOURCE_LABELS)
             sources.update(
-                field.source or ""
+                self._canonical_form_source(field.source or "")
                 for field in self.analysis.fields
                 if (field.source or "").startswith("form.")
             )
+            sources.discard("")
         else:
             sources = {source for source in sources if not source.startswith("form.")}
         self.source_combo.clear()
@@ -1347,6 +1491,42 @@ class PdfAnalysisDialog(QDialog):
             self.source_combo.addItem(label, source)
         index = self.source_combo.findData(current)
         self.source_combo.setCurrentIndex(max(0, index))
+
+    def _create_source_field(self) -> None:
+        """Create a new value in the currently selected profile/form scope."""
+        if self.source_scope.currentData() == "profile":
+            self._create_custom_profile_field()
+            return
+        field = self._selected_field()
+        if field is None:
+            QMessageBox.information(
+                self,
+                "Feld auswählen",
+                "Bitte zuerst ein erkanntes oder neu aufgezogenes Feld auswählen.",
+            )
+            return
+        proposed = self.form_question.text().strip() or field.label.rsplit(" – ", 1)[0]
+        label, accepted = QInputDialog.getText(
+            self,
+            "Neues Formularfeld",
+            "Name des Formularfeldes:",
+            text=proposed,
+        )
+        if not accepted or not label.strip():
+            return
+        self.form_question.setText(label.strip())
+        if field.type in (TemplateFieldType.RADIO, TemplateFieldType.CHECKBOX):
+            option = self.form_option.text().strip() or self._option_from_label(field.label)
+            if not option:
+                option, accepted = QInputDialog.getText(
+                    self,
+                    "Auswahlwert",
+                    "Welcher Wert gehört zu diesem Auswahlfeld (z. B. Ja oder Nein)?",
+                )
+                if not accepted or not option.strip():
+                    return
+                self.form_option.setText(option.strip())
+        self._apply_form_mapping()
 
     def _create_custom_profile_field(self) -> None:
         field = self._selected_field()
@@ -1510,6 +1690,74 @@ class PdfAnalysisDialog(QDialog):
             )
         )
         self._show_page(self.current_page)
+        if self.signature_items:
+            self.signature_items[-1].setSelected(True)
+
+    def _place_signature_in_selected_field(self) -> None:
+        field = self._selected_field()
+        if field is None:
+            QMessageBox.information(
+                self,
+                "Unterschriftsfeld auswählen",
+                "Bitte zuerst den Rahmen auswählen, in den die Unterschrift "
+                "eingesetzt werden soll.",
+            )
+            return
+        if field.type == TemplateFieldType.DIGITAL_SIGNATURE:
+            QMessageBox.information(
+                self,
+                "Zertifikatssignatur oder Unterschriftsbild?",
+                "Dieses Feld ist als digitales Signaturfeld für eine Zertifikats- bzw. "
+                "Acrobat-Signatur angelegt.\n\nFür die hinterlegte Bildunterschrift bitte "
+                "den Feldtyp „signature_image“ auswählen und Position und Größe übernehmen.",
+            )
+            return
+        if field.type != TemplateFieldType.SIGNATURE_IMAGE:
+            QMessageBox.information(
+                self,
+                "Kein Unterschriftsbild-Feld",
+                "Bitte den Feldtyp zuerst auf „signature_image“ ändern und "
+                "Position und Größe übernehmen.",
+            )
+            return
+        asset_id = self.signature_combo.currentData()
+        asset = next(
+            (item for item in self.signature_repository.list() if item.id == asset_id),
+            None,
+        )
+        if asset is None:
+            SignatureManagerDialog(self.signature_repository, self).exec()
+            self._reload_signatures()
+            asset_id = self.signature_combo.currentData()
+            asset = next(
+                (item for item in self.signature_repository.list() if item.id == asset_id),
+                None,
+            )
+        if asset is None:
+            return
+        pixmap = QPixmap(str(self.signature_repository.image_path(asset)))
+        if pixmap.isNull():
+            QMessageBox.critical(
+                self, "Unterschrift nicht lesbar", "Die gespeicherte Bilddatei fehlt."
+            )
+            return
+        rect = field.rect
+        target_width = rect.width * self.SCALE
+        target_height = rect.height * self.SCALE
+        initial_scale = min(
+            target_width / max(1, pixmap.width()),
+            target_height / max(1, pixmap.height()),
+        )
+        self.signature_placements.append(
+            SignaturePlacementState(
+                asset_id=asset.id,
+                page=field.page,
+                x=rect.x0 * self.SCALE,
+                y=rect.y0 * self.SCALE,
+                scale=initial_scale,
+            )
+        )
+        self._show_page(field.page)
         if self.signature_items:
             self.signature_items[-1].setSelected(True)
 

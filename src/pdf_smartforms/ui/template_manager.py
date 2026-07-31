@@ -54,9 +54,17 @@ class TemplateManagerDialog(QDialog):
         )
         description.setWordWrap(True)
         layout.addWidget(description)
-        self.table = QTableWidget(0, 6)
+        self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
-            ["Name", "Version", "Status", "Sprache", "Felder", "Min. App-Version"]
+            [
+                "Name",
+                "Version",
+                "Erstellt am",
+                "Status",
+                "Sprache",
+                "Felder",
+                "Min. App-Version",
+            ]
         )
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -87,6 +95,7 @@ class TemplateManagerDialog(QDialog):
             values = (
                 template.name,
                 template.version,
+                self.repository.created_date(template),
                 _STATUS_LABELS[template.status],
                 template.language,
                 str(len(template.fields)),
