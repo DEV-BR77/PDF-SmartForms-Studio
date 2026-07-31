@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 APP_NAME = "PDF SmartForms Studio"
 EDITION = "Community"
-__version__ = "1.0.0-rc.8"
+__version__ = "1.0.0-rc.9"
 REPOSITORY_URL = "https://github.com/DEV-BR77/PDF-SmartForms-Studio"
 COPYRIGHT = "Copyright © Björn Radke"
 MAINTAINER_MODE = os.getenv("PSFS_MAINTAINER_MODE", "").strip() == "1"

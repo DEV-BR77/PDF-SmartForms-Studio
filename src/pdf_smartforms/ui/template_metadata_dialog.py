@@ -28,6 +28,16 @@ _CATEGORIES = [
     ("Unternehmen", "company"),
     ("Sonstiges", "other"),
 ]
+_INSTITUTION_TYPES = ("Schule", "Bank", "Behörde", "Sportverein", "Verein", "Unternehmen")
+_SCOPES = ("Lokal / Institution", "Stadt / Gemeinde", "Bundesland", "Deutschlandweit")
+_DOCUMENT_TYPES = (
+    "Anmeldung",
+    "Antrag",
+    "Einverständniserklärung",
+    "Datenschutzvereinbarung",
+    "Informationsblatt mit Rückmeldung",
+)
+_TARGET_GROUPS = ("Eltern / Familien", "Schüler", "Mitglieder", "Kunden", "Bürger")
 
 
 class TemplateMetadataDialog(QDialog):
@@ -55,23 +65,23 @@ class TemplateMetadataDialog(QDialog):
         self.category = QComboBox()
         for label, value in _CATEGORIES:
             self.category.addItem(label, value)
-        self.institution_type = QLineEdit()
+        self.institution_type = self._editable_combo(_INSTITUTION_TYPES)
         self.institution_subtype = QLineEdit()
         self.country = QLineEdit("DE")
         self.state = QLineEdit()
         self.city = QLineEdit(city_suggestion)
-        self.scope = QLineEdit()
-        self.document_type = QLineEdit()
-        self.target_group = QLineEdit()
+        self.scope = self._editable_combo(_SCOPES)
+        self.document_type = self._editable_combo(_DOCUMENT_TYPES)
+        self.target_group = self._editable_combo(_TARGET_GROUPS)
         self.published = QLineEdit(publication_suggestion)
         self.valid_from = QLineEdit()
         self.valid_until = QLineEdit()
         self.keywords = QLineEdit()
         for widget in (self.published, self.valid_from, self.valid_until):
             widget.setPlaceholderText("JJJJ-MM-TT")
-        form.addRow("Institution", self.institution)
-        form.addRow("Kategorie", self.category)
-        form.addRow("Art", self.institution_type)
+        form.addRow("Institution *", self.institution)
+        form.addRow("Kategorie *", self.category)
+        form.addRow("Art *", self.institution_type)
         form.addRow("Unterart", self.institution_subtype)
         form.addRow("Land", self.country)
         form.addRow("Bundesland", self.state)
@@ -93,8 +103,38 @@ class TemplateMetadataDialog(QDialog):
         buttons.accepted.connect(self._validate_and_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self._apply_suggestions(institution_suggestion)
+
+    @staticmethod
+    def _editable_combo(values: tuple[str, ...]) -> QComboBox:
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.addItem("")
+        combo.addItems(values)
+        return combo
+
+    def _apply_suggestions(self, institution: str) -> None:
+        normalized = institution.casefold()
+        if any(word in normalized for word in ("schule", "gymnasium", "realschule")):
+            self.category.setCurrentIndex(self.category.findData("education"))
+            self.institution_type.setCurrentText("Schule")
+            self.target_group.setCurrentText("Eltern / Familien")
 
     def _validate_and_accept(self) -> None:
+        missing = []
+        if not self.institution.text().strip():
+            missing.append("Institution")
+        if not self.category.currentData():
+            missing.append("Kategorie")
+        if not self.institution_type.currentText().strip():
+            missing.append("Art")
+        if missing:
+            QMessageBox.warning(
+                self,
+                "Pflichtangaben fehlen",
+                "Bitte ergänzen: " + ", ".join(missing),
+            )
+            return
         for label, widget in (
             ("Veröffentlichungsdatum", self.published),
             ("Gültig ab", self.valid_from),
@@ -119,14 +159,14 @@ class TemplateMetadataDialog(QDialog):
         return TemplateMetadata(
             institution_name=self.institution.text().strip(),
             institution_category=str(self.category.currentData() or ""),
-            institution_type=self.institution_type.text().strip(),
+            institution_type=self.institution_type.currentText().strip(),
             institution_subtype=self.institution_subtype.text().strip(),
             country=self.country.text().strip().upper(),
             state=self.state.text().strip(),
             city=self.city.text().strip(),
-            geographic_scope=self.scope.text().strip(),
-            document_type=self.document_type.text().strip(),
-            target_group=self.target_group.text().strip(),
+            geographic_scope=self.scope.currentText().strip(),
+            document_type=self.document_type.currentText().strip(),
+            target_group=self.target_group.currentText().strip(),
             document_published_at=self.published.text().strip(),
             valid_from=self.valid_from.text().strip(),
             valid_until=self.valid_until.text().strip(),

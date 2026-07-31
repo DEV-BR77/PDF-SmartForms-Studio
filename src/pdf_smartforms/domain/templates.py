@@ -81,6 +81,9 @@ class TemplateField:
     source: str = ""
     required: bool = False
     option_value: str = ""
+    default_value: str = ""
+    font_family: str = "Helvetica"
+    font_size: float = 9.0
 
 
 @dataclass(slots=True)
@@ -176,6 +179,9 @@ class Template:
                 source=str(item.get("source", "")),
                 required=bool(item.get("required", False)),
                 option_value=str(item.get("option_value", "")),
+                default_value=str(item.get("default_value", "")),
+                font_family=str(item.get("font_family", "Helvetica")),
+                font_size=float(item.get("font_size", 9.0)),
             )
             for item in payload.get("fields", [])
         ]

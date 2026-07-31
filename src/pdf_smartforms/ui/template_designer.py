@@ -31,6 +31,8 @@ from PyQt6.QtWidgets import (
     QGraphicsPixmapItem,
     QGraphicsRectItem,
     QGraphicsScene,
+    QGraphicsSceneHoverEvent,
+    QGraphicsSceneMouseEvent,
     QGraphicsView,
     QHBoxLayout,
     QLabel,
@@ -72,6 +74,10 @@ class DesignerField:
     rect: Rect
     source: str = ""
     required: bool = False
+    option_value: str = ""
+    default_value: str = ""
+    font_family: str = "Helvetica"
+    font_size: float = 9.0
 
 
 class DesignerFieldItem(QGraphicsRectItem):
@@ -81,7 +87,9 @@ class DesignerFieldItem(QGraphicsRectItem):
         super().__init__(0, 0, field.rect.width, field.rect.height)
         self.field = field
         self.on_changed = on_changed
+        self.resizing = False
         self.setPos(field.rect.x0, field.rect.y0)
+        self.setAcceptHoverEvents(True)
         self.setPen(QPen(QColor("#235dcc"), 2))
         self.setBrush(QColor(35, 93, 204, 35))
         self.setFlags(
@@ -90,6 +98,45 @@ class DesignerFieldItem(QGraphicsRectItem):
             | QGraphicsItem.GraphicsItemFlag.ItemIsFocusable
             | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
         )
+
+    def _in_resize_corner(self, position: QPointF) -> bool:
+        return (
+            position.x() >= self.rect().right() - 12 and position.y() >= self.rect().bottom() - 12
+        )
+
+    def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent | None) -> None:
+        if event is not None:
+            self.setCursor(
+                Qt.CursorShape.SizeFDiagCursor
+                if self._in_resize_corner(event.pos())
+                else Qt.CursorShape.SizeAllCursor
+            )
+        super().hoverMoveEvent(event)
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent | None) -> None:
+        if event is not None and self._in_resize_corner(event.pos()):
+            self.resizing = True
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent | None) -> None:
+        if event is not None and self.resizing:
+            position = event.pos()
+            self.setRect(0, 0, max(8.0, position.x()), max(8.0, position.y()))
+            if callable(self.on_changed):
+                self.on_changed(self.field.id)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent | None) -> None:
+        if self.resizing:
+            self.resizing = False
+            if event is not None:
+                event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value: object) -> object:
         result = super().itemChange(change, value)
@@ -222,6 +269,8 @@ class TemplateDesignerDialog(QDialog):
         pdf_path: Path,
         repository: TemplateRepository,
         parent: QWidget | None = None,
+        *,
+        existing_template: Template | None = None,
     ) -> None:
         super().__init__(parent)
         self.pdf_path = pdf_path
@@ -231,7 +280,10 @@ class TemplateDesignerDialog(QDialog):
         self.fields: list[DesignerField] = []
         self.items: dict[str, DesignerFieldItem] = {}
         self.undo_stack = QUndoStack(self)
-        self.setWindowTitle("Neues Template erstellen")
+        self.existing_template = existing_template
+        self.setWindowTitle(
+            "Template bearbeiten" if existing_template is not None else "Neues Template erstellen"
+        )
         self.resize(1440, 900)
         self.setWindowFlags(
             self.windowFlags()
@@ -239,17 +291,39 @@ class TemplateDesignerDialog(QDialog):
             | Qt.WindowType.WindowMinimizeButtonHint
         )
         self._build_ui()
-        for detected in self.analysis.fields:
-            self.fields.append(
-                DesignerField(
-                    id=detected.id,
-                    label=detected.label,
-                    type=detected.type,
-                    page=detected.page,
-                    rect=detected.rect,
-                    source=detected.source or "",
+        if existing_template is not None:
+            for field in existing_template.fields:
+                self.fields.append(
+                    DesignerField(
+                        id=field.id,
+                        label=field.label,
+                        type=field.type,
+                        page=field.page,
+                        rect=field.rect,
+                        source=field.source,
+                        required=field.required,
+                        option_value=field.option_value,
+                        default_value=field.default_value,
+                        font_family=field.font_family,
+                        font_size=field.font_size,
+                    )
                 )
-            )
+        else:
+            for detected in self.analysis.fields:
+                self.fields.append(
+                    DesignerField(
+                        id=detected.id,
+                        label=detected.label,
+                        type=detected.type,
+                        page=detected.page,
+                        rect=detected.rect,
+                        source=detected.source or "",
+                        option_value=detected.option_value,
+                        default_value=detected.default_value,
+                        font_family=detected.font_family,
+                        font_size=detected.font_size,
+                    )
+                )
         self._refresh_list()
         self._show_page(0)
 
@@ -327,9 +401,17 @@ class TemplateDesignerDialog(QDialog):
         layout.addWidget(toolbar)
 
         metadata = QHBoxLayout()
-        self.template_name = QLineEdit(self.analysis.title)
-        self.template_id = QLineEdit(_slugify(self.analysis.title))
-        self.template_version = QLineEdit("1.0.0")
+        self.template_name = QLineEdit(
+            self.existing_template.name if self.existing_template else self.analysis.title
+        )
+        self.template_id = QLineEdit(
+            self.existing_template.id if self.existing_template else _slugify(self.analysis.title)
+        )
+        self.template_version = QLineEdit(
+            self._next_version(self.existing_template.version)
+            if self.existing_template
+            else "1.0.0"
+        )
         metadata.addWidget(QLabel("Name"))
         metadata.addWidget(self.template_name, 2)
         metadata.addWidget(QLabel("ID"))
@@ -368,11 +450,29 @@ class TemplateDesignerDialog(QDialog):
         for field_type in TemplateFieldType:
             self.field_type.addItem(field_type.value, field_type.value)
         self.field_type.currentIndexChanged.connect(self._apply_properties)
+        self.source_scope = QComboBox()
+        self.source_scope.addItem("Profil – wiederverwendbare persönliche Daten", "profile")
+        self.source_scope.addItem("Formular – Angabe nur für diese Vorlage", "form")
+        self.source_scope.currentIndexChanged.connect(self._source_scope_changed)
         self.field_source = QComboBox()
-        self.field_source.addItem("Nur für dieses Formular", "")
         for source, label in sorted(SOURCE_LABELS.items(), key=lambda item: item[1]):
             self.field_source.addItem(label, source)
         self.field_source.currentIndexChanged.connect(self._apply_properties)
+        self.form_source = QLineEdit()
+        self.form_source.setPlaceholderText("z. B. absender_homepage")
+        self.form_source.editingFinished.connect(self._apply_properties)
+        self.default_value = QLineEdit()
+        self.default_value.setPlaceholderText("Optionaler Vorgabewert")
+        self.default_value.editingFinished.connect(self._apply_properties)
+        self.font_family = QComboBox()
+        for family in ("Helvetica", "Arial", "Times", "Courier"):
+            self.font_family.addItem(family, family)
+        self.font_family.currentIndexChanged.connect(self._apply_properties)
+        self.font_size = QDoubleSpinBox()
+        self.font_size.setRange(5.0, 36.0)
+        self.font_size.setDecimals(1)
+        self.font_size.setSuffix(" pt")
+        self.font_size.editingFinished.connect(self._apply_properties)
         self.required = QCheckBox("Pflichtfeld")
         self.required.toggled.connect(self._apply_properties)
         self.x_position = self._coordinate_input()
@@ -388,7 +488,12 @@ class TemplateDesignerDialog(QDialog):
             coordinate.editingFinished.connect(self._apply_coordinates)
         properties.addRow("Bezeichnung", self.field_label)
         properties.addRow("Feldtyp", self.field_type)
-        properties.addRow("Datenquelle", self.field_source)
+        properties.addRow("Datenquelle", self.source_scope)
+        properties.addRow("Profilfeld", self.field_source)
+        properties.addRow("Formularfeld", self.form_source)
+        properties.addRow("Vorgabewert", self.default_value)
+        properties.addRow("Schriftart", self.font_family)
+        properties.addRow("Schriftgröße", self.font_size)
         properties.addRow("", self.required)
         properties.addRow("X-Position", self.x_position)
         properties.addRow("Y-Position", self.y_position)
@@ -405,6 +510,13 @@ class TemplateDesignerDialog(QDialog):
         splitter.addWidget(side)
         splitter.setSizes([260, 900, 360])
         layout.addWidget(splitter)
+
+    @staticmethod
+    def _next_version(version: str) -> str:
+        parts = version.split(".")
+        if len(parts) == 3 and all(part.isdigit() for part in parts):
+            return f"{parts[0]}.{parts[1]}.{int(parts[2]) + 1}"
+        return f"{version}.1"
 
     def resizeEvent(self, event: QResizeEvent | None) -> None:
         super().resizeEvent(event)
@@ -444,6 +556,10 @@ class TemplateDesignerDialog(QDialog):
                 ),
                 field.source,
                 field.required,
+                field.option_value,
+                field.default_value,
+                field.font_family,
+                field.font_size,
             )
             item = DesignerFieldItem(scaled_field, lambda field_id: self._item_moved(field_id))
             item.field = field
@@ -552,7 +668,16 @@ class TemplateDesignerDialog(QDialog):
         type_index = self.field_type.findData(field.type.value)
         self.field_type.setCurrentIndex(max(0, type_index))
         source_index = self.field_source.findData(field.source)
+        is_form = field.source.startswith("form.") or not field.source
+        scope_index = self.source_scope.findData("form" if is_form else "profile")
+        self.source_scope.setCurrentIndex(max(0, scope_index))
         self.field_source.setCurrentIndex(max(0, source_index))
+        self.form_source.setText(field.source.removeprefix("form.") if is_form else "")
+        self.default_value.setText(field.default_value)
+        font_index = self.font_family.findData(field.font_family)
+        self.font_family.setCurrentIndex(max(0, font_index))
+        self.font_size.setValue(field.font_size)
+        self._source_scope_changed()
         self.required.setChecked(field.required)
         self.x_position.setValue(field.rect.x0)
         self.y_position.setValue(field.rect.y0)
@@ -571,9 +696,21 @@ class TemplateDesignerDialog(QDialog):
             return
         field.label = self.field_label.text().strip() or "Unbenanntes Feld"
         field.type = TemplateFieldType(str(self.field_type.currentData()))
-        field.source = str(self.field_source.currentData() or "")
+        if self.source_scope.currentData() == "form":
+            key = _slugify(self.form_source.text() or field.label).replace("-", "_")
+            field.source = f"form.{key}"
+        else:
+            field.source = str(self.field_source.currentData() or "")
+        field.default_value = self.default_value.text()
+        field.font_family = str(self.font_family.currentData() or "Helvetica")
+        field.font_size = self.font_size.value()
         field.required = self.required.isChecked()
         self._refresh_list(field.id)
+
+    def _source_scope_changed(self) -> None:
+        is_form = self.source_scope.currentData() == "form"
+        self.field_source.setVisible(not is_form)
+        self.form_source.setVisible(is_form)
 
     def _apply_coordinates(self) -> None:
         field = self._selected_field()
@@ -689,6 +826,10 @@ class TemplateDesignerDialog(QDialog):
                     field.rect,
                     field.source,
                     field.required,
+                    field.option_value,
+                    field.default_value,
+                    field.font_family,
+                    field.font_size,
                 )
                 for field in self.fields
             ],

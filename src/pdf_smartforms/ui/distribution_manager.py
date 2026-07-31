@@ -10,9 +10,10 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
+    QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -23,6 +24,60 @@ from PyQt6.QtWidgets import (
 from pdf_smartforms.distribution.exchange_package import build_exchange_package
 from pdf_smartforms.distribution.repository import DistributionListRepository
 from pdf_smartforms.domain.distribution import DistributionList
+
+
+class DistributionListEditor(QDialog):
+    """Keep invalid input visible so users can correct it in place."""
+
+    def __init__(
+        self,
+        repository: DistributionListRepository,
+        distribution_list: DistributionList,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.repository = repository
+        self.distribution_list = distribution_list
+        self.setWindowTitle("Verteilerliste bearbeiten")
+        self.resize(560, 420)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Name der Verteilerliste"))
+        self.name = QLineEdit(distribution_list.name)
+        layout.addWidget(self.name)
+        layout.addWidget(QLabel("E-Mail-Adressen – eine Adresse pro Zeile"))
+        self.recipients = QPlainTextEdit("\n".join(distribution_list.recipients))
+        layout.addWidget(self.recipients)
+        self.error = QLabel()
+        self.error.setWordWrap(True)
+        self.error.setStyleSheet("color: #b42318;")
+        layout.addWidget(self.error)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        save = buttons.button(QDialogButtonBox.StandardButton.Save)
+        if save is not None:
+            save.setText("Liste speichern")
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _save(self) -> None:
+        candidate = DistributionList(
+            id=self.distribution_list.id,
+            name=self.name.text().strip(),
+            recipients=[
+                line.strip() for line in self.recipients.toPlainText().splitlines() if line.strip()
+            ],
+        )
+        try:
+            self.repository.save(candidate)
+        except ValueError as error:
+            self.error.setText(str(error))
+            self.recipients.setFocus()
+            return
+        self.distribution_list.name = candidate.name
+        self.distribution_list.recipients = candidate.recipients
+        self.accept()
 
 
 class DistributionManagerDialog(QDialog):
@@ -95,29 +150,8 @@ class DistributionManagerDialog(QDialog):
         self._edit(selected)
 
     def _edit(self, distribution_list: DistributionList) -> None:
-        name, accepted = QInputDialog.getText(
-            self, "Verteilerliste", "Name:", text=distribution_list.name
-        )
-        if not accepted:
-            return
-        recipients, accepted = QInputDialog.getMultiLineText(
-            self,
-            "Empfänger",
-            "Eine E-Mail-Adresse pro Zeile:",
-            "\n".join(distribution_list.recipients),
-        )
-        if not accepted:
-            return
-        distribution_list.name = name.strip()
-        distribution_list.recipients = [
-            line.strip() for line in recipients.splitlines() if line.strip()
-        ]
-        try:
-            self.repository.save(distribution_list)
-        except ValueError as error:
-            QMessageBox.warning(self, "Liste ungültig", str(error))
-            return
-        self._reload()
+        if DistributionListEditor(self.repository, distribution_list, self).exec():
+            self._reload()
 
     def _delete_list(self) -> None:
         selected = self._selected()

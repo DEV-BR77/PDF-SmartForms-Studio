@@ -50,3 +50,5 @@ class PlacedText:
     y0: float
     x1: float
     y1: float
+    font_family: str = "Helvetica"
+    font_size: float = 9.0
