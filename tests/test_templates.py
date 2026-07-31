@@ -35,6 +35,9 @@ def example_template() -> Template:
                 rect=Rect(10, 20, 110, 40),
                 source="participant.first_name",
                 required=True,
+                default_value="Mila",
+                font_family="Times",
+                font_size=8.5,
             )
         ],
     )

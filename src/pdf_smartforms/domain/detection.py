@@ -26,6 +26,9 @@ class DetectedField:
     confidence: float
     origin: str
     option_value: str = ""
+    default_value: str = ""
+    font_family: str = "Helvetica"
+    font_size: float = 9.0
 
     @property
     def status_label(self) -> str:

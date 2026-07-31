@@ -47,6 +47,14 @@ class FieldDictionaryRepository:
             self.save(dictionary)
         return changed
 
+    def reassign(self, alias: str, source: str) -> bool:
+        """Move a learned label to a different source after explicit confirmation."""
+        dictionary = self.load()
+        changed = dictionary.reassign(alias, source)
+        if changed:
+            self.save(dictionary)
+        return changed
+
     def export_to(self, target: Path) -> None:
         target.write_text(
             json.dumps(self.load().to_dict(), ensure_ascii=False, indent=2),

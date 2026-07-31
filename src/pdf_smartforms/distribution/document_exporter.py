@@ -25,13 +25,13 @@ def export_work_copy(
             page = document.load_page(placement.page)
             available_width = max(10, placement.x1 - placement.x0 - 4)
             font_size = min(
-                9.0,
+                placement.font_size,
                 available_width
                 / max(
                     1,
                     pymupdf.get_text_length(
                         placement.value,
-                        fontname="helv",
+                        fontname=_pdf_font_name(placement.font_family),
                         fontsize=1,
                     ),
                 ),
@@ -41,7 +41,7 @@ def export_work_copy(
                 (placement.x0 + 2, baseline),
                 placement.value,
                 fontsize=font_size,
-                fontname="helv",
+                fontname=_pdf_font_name(placement.font_family),
                 color=(0, 0, 0),
             )
         for signature in signatures:
@@ -63,3 +63,12 @@ def export_work_copy(
     finally:
         document.close()
     return target_pdf
+
+
+def _pdf_font_name(family: str) -> str:
+    normalized = family.casefold()
+    if "courier" in normalized:
+        return "cour"
+    if "times" in normalized:
+        return "tiro"
+    return "helv"

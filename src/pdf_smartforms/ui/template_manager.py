@@ -66,9 +66,12 @@ class TemplateManagerDialog(QDialog):
         import_button = QPushButton("Templatepaket importieren")
         import_button.setObjectName("primary")
         import_button.clicked.connect(self._import_package)
+        edit_button = QPushButton("Template bearbeiten")
+        edit_button.clicked.connect(self._edit_template)
         delete_button = QPushButton("Template entfernen")
         delete_button.clicked.connect(self._delete_template)
         actions.addWidget(import_button)
+        actions.addWidget(edit_button)
         actions.addWidget(delete_button)
         actions.addStretch()
         layout.addLayout(actions)
@@ -94,6 +97,31 @@ class TemplateManagerDialog(QDialog):
                 item.setData(Qt.ItemDataRole.UserRole, template.id)
                 self.table.setItem(row, column, item)
         self.table.resizeColumnsToContents()
+
+    def _edit_template(self) -> None:
+        template = self._selected_template()
+        if template is None:
+            QMessageBox.information(
+                self, "Template auswählen", "Bitte zuerst ein Template auswählen."
+            )
+            return
+        source_pdf = self.repository.source_pdf_path(template)
+        if source_pdf is None:
+            QMessageBox.information(
+                self,
+                "PDF nicht enthalten",
+                "Dieses Template enthält kein bearbeitbares Quell-PDF.",
+            )
+            return
+        from pdf_smartforms.ui.template_designer import TemplateDesignerDialog
+
+        if TemplateDesignerDialog(
+            source_pdf,
+            self.repository,
+            self,
+            existing_template=template,
+        ).exec():
+            self._reload()
 
     def _selected_template(self) -> Template | None:
         row = self.table.currentRow()

@@ -20,6 +20,7 @@ from PyQt6.QtGui import (
     QPixmap,
     QResizeEvent,
     QShowEvent,
+    QWheelEvent,
 )
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -90,6 +91,13 @@ _COLORS = {
     MatchStatus.UNCERTAIN: QColor("#d79614"),
     MatchStatus.MISSING: QColor("#d33c3c"),
 }
+_FORM_SOURCE_LABELS = {
+    "form.sender_name": "Absender – Name",
+    "form.sender_email": "Absender – E-Mail-Adresse",
+    "form.sender_homepage": "Absender – Homepage",
+    "form.recipient_name": "Empfänger – Name",
+    "form.document_reference": "Dokument-/Vorgangsnummer",
+}
 
 
 @dataclass(slots=True)
@@ -140,6 +148,7 @@ class FitGraphicsView(QGraphicsView):
     """Keep the complete PDF page visible until the user zooms manually."""
 
     rectangle_created = pyqtSignal(QRectF)
+    page_change_requested = pyqtSignal(int)
 
     def __init__(self, scene: QGraphicsScene, parent: QWidget | None = None) -> None:
         super().__init__(scene, parent)
@@ -163,6 +172,16 @@ class FitGraphicsView(QGraphicsView):
     def zoom(self, factor: float) -> None:
         self.auto_fit = False
         self.scale(factor, factor)
+
+    def wheelEvent(self, event: QWheelEvent | None) -> None:
+        if event is None:
+            return
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self.zoom(1.12 if event.angleDelta().y() > 0 else 1 / 1.12)
+            event.accept()
+            return
+        self.page_change_requested.emit(-1 if event.angleDelta().y() > 0 else 1)
+        event.accept()
 
     def begin_field_draw(self) -> None:
         self.drawing_field = True
@@ -306,6 +325,7 @@ class PdfAnalysisDialog(QDialog):
         self.scene = QGraphicsScene(self)
         self.scene.selectionChanged.connect(self._sync_scene_selection)
         self.view = FitGraphicsView(self.scene)
+        self.view.page_change_requested.connect(self._change_page_by_wheel)
         self.view.rectangle_created.connect(self._create_manual_field)
         self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -323,14 +343,14 @@ class PdfAnalysisDialog(QDialog):
         self.field_list = QListWidget()
         self.field_list.currentItemChanged.connect(self._focus_selected_field)
         field_layout.addWidget(self.field_list, 1)
-        add_field = QPushButton("Feld auf PDF aufziehen")
+        add_field = QPushButton("Neues Feld hinzufügen")
         add_field.clicked.connect(self._begin_manual_field)
         field_layout.addWidget(add_field)
         self.show_all_frames = QCheckBox("Alle Feldrahmen anzeigen")
         self.show_all_frames.setChecked(False)
         self.show_all_frames.toggled.connect(self._update_overlay_visibility)
         field_layout.addWidget(self.show_all_frames)
-        save_template = QPushButton("Korrigierte Felder als Vorlage speichern")
+        save_template = QPushButton("Änderungen am Template speichern")
         save_template.setToolTip(
             "Speichert die aktuelle Erkennung samt manueller Korrekturen "
             "als wiederverwendbare lokale Vorlage"
@@ -353,6 +373,11 @@ class PdfAnalysisDialog(QDialog):
         )
         side_layout.addWidget(self.profile_combo)
         side_layout.addWidget(QLabel("<b>Zuordnung und Einstellungen</b>"))
+        self.source_scope = QComboBox()
+        self.source_scope.addItem("Profil – persönliche, wiederverwendbare Daten", "profile")
+        self.source_scope.addItem("Formular – Angaben nur für diese Vorlage", "form")
+        self.source_scope.currentIndexChanged.connect(lambda _index: self._reload_source_choices())
+        side_layout.addWidget(self.source_scope)
         self.source_combo = QComboBox()
         self._reload_source_choices()
         side_layout.addWidget(self.source_combo)
@@ -370,9 +395,19 @@ class PdfAnalysisDialog(QDialog):
         self.form_group.setPlaceholderText("z. B. lernmittel_entgeltliche_ausleihe")
         self.form_option = QLineEdit()
         self.form_option.setPlaceholderText("z. B. Ja oder Nein")
+        self.form_default = QLineEdit()
+        self.form_default.setPlaceholderText("Optionaler Vorgabewert")
+        self.form_default.textEdited.connect(self._set_form_text_value)
         self.form_value = QComboBox()
         self.form_value.setToolTip("Aktuelle Auswahl für Vorschau und PDF-Ausgabe")
         self.form_value.currentIndexChanged.connect(self._set_form_value)
+        self.font_family = QComboBox()
+        for family in ("Helvetica", "Arial", "Times", "Courier"):
+            self.font_family.addItem(family, family)
+        self.font_size = QDoubleSpinBox()
+        self.font_size.setRange(5.0, 36.0)
+        self.font_size.setDecimals(1)
+        self.font_size.setSuffix(" pt")
         field_properties.addRow("Feldtyp", self.detected_type)
         field_properties.addRow("X", self.detected_x)
         field_properties.addRow("Y", self.detected_y)
@@ -381,7 +416,10 @@ class PdfAnalysisDialog(QDialog):
         field_properties.addRow("Formularfrage", self.form_question)
         field_properties.addRow("Optionsgruppe", self.form_group)
         field_properties.addRow("Auswahlwert", self.form_option)
+        field_properties.addRow("Vorgabewert", self.form_default)
         field_properties.addRow("Aktueller Wert", self.form_value)
+        field_properties.addRow("Schriftart", self.font_family)
+        field_properties.addRow("Schriftgröße", self.font_size)
         side_layout.addLayout(field_properties)
         apply_geometry = QPushButton("Position und Größe übernehmen")
         apply_geometry.clicked.connect(self._apply_selected_geometry)
@@ -476,12 +514,38 @@ class PdfAnalysisDialog(QDialog):
         splitter.setChildrenCollapsible(False)
         splitter.setSizes([300, 820, 360])
         layout.addWidget(splitter)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Close
+        )
+        apply_button = buttons.button(QDialogButtonBox.StandardButton.Apply)
+        if apply_button is not None:
+            apply_button.setText("Vorschau öffnen")
+            apply_button.clicked.connect(self._open_output_preview)
         close_button = buttons.button(QDialogButtonBox.StandardButton.Close)
         if close_button is not None:
-            close_button.setText("Schließen")
+            close_button.setText("Fertig")
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _open_output_preview(self) -> None:
+        handle, filename = tempfile.mkstemp(prefix="psfs-preview-", suffix=".pdf")
+        import os
+
+        os.close(handle)
+        target = Path(filename)
+        target.unlink(missing_ok=True)
+        try:
+            export_work_copy(
+                self.pdf_path,
+                target,
+                self._placed_signatures(),
+                self._placed_texts(),
+            )
+        except (OSError, ValueError) as error:
+            target.unlink(missing_ok=True)
+            QMessageBox.warning(self, "Vorschau nicht möglich", str(error))
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
     @staticmethod
     def _coordinate_input(minimum: float = 0.0) -> QDoubleSpinBox:
@@ -538,6 +602,9 @@ class PdfAnalysisDialog(QDialog):
                 confidence=1.0,
                 origin=f"Gespeicherte Vorlage {template.version}",
                 option_value=field.option_value,
+                default_value=field.default_value,
+                font_family=field.font_family,
+                font_size=field.font_size,
             )
             for field in template.fields
         )
@@ -584,7 +651,7 @@ class PdfAnalysisDialog(QDialog):
             if value:
                 text_item = self.scene.addText(value)
                 assert text_item is not None
-                text_item.setFont(QFont("Arial", 8))
+                text_item.setFont(QFont(field.font_family, round(field.font_size)))
                 text_item.setDefaultTextColor(QColor("#102a43"))
                 text_item.setPos(
                     (rect.x0 + 2) * self.SCALE,
@@ -613,6 +680,10 @@ class PdfAnalysisDialog(QDialog):
         if field is None:
             return
         if field.source:
+            scope = "form" if field.source.startswith("form.") else "profile"
+            scope_index = self.source_scope.findData(scope)
+            self.source_scope.setCurrentIndex(max(0, scope_index))
+            self._reload_source_choices(field.source)
             source_index = self.source_combo.findData(field.source)
             if source_index >= 0:
                 self.source_combo.setCurrentIndex(source_index)
@@ -631,6 +702,10 @@ class PdfAnalysisDialog(QDialog):
             field_source.removeprefix("form.") if field_source.startswith("form.") else ""
         )
         self.form_option.setText(field.option_value or self._option_from_label(field.label))
+        self.form_default.setText(self.form_values.get(field.source or "", field.default_value))
+        font_index = self.font_family.findData(field.font_family)
+        self.font_family.setCurrentIndex(max(0, font_index))
+        self.font_size.setValue(field.font_size)
         self._reload_form_values(field)
         if field.page != self.current_page:
             self._show_page(field.page)
@@ -691,6 +766,15 @@ class PdfAnalysisDialog(QDialog):
             return
         value = self.form_value.currentData()
         self.form_values[field.source or ""] = value if isinstance(value, str) else ""
+        self._show_page(self.current_page)
+
+    def _set_form_text_value(self, value: str) -> None:
+        field = self._selected_field()
+        if field is None or not (field.source or "").startswith("form."):
+            return
+        if field.type in (TemplateFieldType.RADIO, TemplateFieldType.CHECKBOX):
+            return
+        self.form_values[field.source or ""] = value
         self._show_page(self.current_page)
 
     def _selected_field(self) -> DetectedField | None:
@@ -809,6 +893,9 @@ class PdfAnalysisDialog(QDialog):
                 self.detected_x.value() + self.detected_width.value(),
                 self.detected_y.value() + self.detected_height.value(),
             ),
+            default_value=self.form_default.text(),
+            font_family=str(self.font_family.currentData() or "Helvetica"),
+            font_size=self.font_size.value(),
             origin=f"{field.origin} · manuell korrigiert",
         )
         self.analysis = AnalysisResult(
@@ -923,6 +1010,9 @@ class PdfAnalysisDialog(QDialog):
                     rect=field.rect,
                     source=field.source or "",
                     option_value=field.option_value,
+                    default_value=field.default_value,
+                    font_family=field.font_family,
+                    font_size=field.font_size,
                 )
                 for field in self.analysis.fields
             ],
@@ -1010,12 +1100,22 @@ class PdfAnalysisDialog(QDialog):
                 self, "Feld auswählen", "Bitte zuerst ein erkanntes Feld auswählen."
             )
             return
-        if self.learn_alias.isChecked():
+        if self.learn_alias.isChecked() and not source.startswith("form."):
             try:
                 self.dictionary_repository.learn(field.label, source)
             except AliasConflict as error:
-                QMessageBox.warning(self, "Lexikon-Konflikt", str(error))
-                return
+                answer = QMessageBox.question(
+                    self,
+                    "Zuordnung ändern?",
+                    f"{error}\n\n"
+                    f"Soll „{field.label}“ künftig stattdessen "
+                    f"„{self.source_combo.currentText()}“ zugeordnet werden?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+                self.dictionary_repository.reassign(field.label, source)
         updated = replace(
             field,
             source=source,
@@ -1043,20 +1143,24 @@ class PdfAnalysisDialog(QDialog):
         question = self.form_question.text().strip()
         option = self.form_option.text().strip()
         group = self._runtime_key(self.form_group.text().strip() or question)
-        if not question or not option:
+        is_option = field.type in (TemplateFieldType.RADIO, TemplateFieldType.CHECKBOX)
+        if not question or (is_option and not option):
             QMessageBox.information(
                 self,
                 "Formularangabe ergänzen",
-                "Bitte Formularfrage und Auswahlwert eintragen.",
+                "Bitte eine Feldbezeichnung eintragen"
+                + (" und den Auswahlwert ergänzen." if is_option else "."),
             )
             return
         source = f"form.{group}"
         updated = replace(
             field,
-            label=f"{question} – {option}",
-            type=TemplateFieldType.RADIO,
+            label=f"{question} – {option}" if is_option else question,
             source=source,
-            option_value=option,
+            option_value=option if is_option else "",
+            default_value=self.form_default.text(),
+            font_family=str(self.font_family.currentData() or "Helvetica"),
+            font_size=self.font_size.value(),
             status=MatchStatus.MAPPED,
             confidence=1.0,
             origin="Formularangabe · manuell bestätigt",
@@ -1199,6 +1303,7 @@ class PdfAnalysisDialog(QDialog):
             if isinstance(self.source_combo.currentData(), str)
             else ""
         )
+        scope = str(self.source_scope.currentData()) if hasattr(self, "source_scope") else "profile"
         sources = set(SOURCE_LABELS)
         sources.update(self.dictionary_repository.load().sources())
         profile = self._selected_profile() if hasattr(self, "profile_combo") else None
@@ -1207,6 +1312,15 @@ class PdfAnalysisDialog(QDialog):
             for custom in profile.custom_fields:
                 sources.add(custom.key)
                 custom_labels[custom.key] = custom.label
+        if scope == "form":
+            sources = set(_FORM_SOURCE_LABELS)
+            sources.update(
+                field.source or ""
+                for field in self.analysis.fields
+                if (field.source or "").startswith("form.")
+            )
+        else:
+            sources = {source for source in sources if not source.startswith("form.")}
         self.source_combo.clear()
         self.source_combo.addItem("Bitte Datenquelle auswählen", None)
         choices = [
@@ -1214,9 +1328,16 @@ class PdfAnalysisDialog(QDialog):
                 source,
                 SOURCE_LABELS.get(
                     source,
-                    custom_labels.get(
+                    _FORM_SOURCE_LABELS.get(
                         source,
-                        source.removeprefix("custom.").replace("_", " ").replace(".", " ").title(),
+                        custom_labels.get(
+                            source,
+                            source.removeprefix("custom.")
+                            .removeprefix("form.")
+                            .replace("_", " ")
+                            .replace(".", " ")
+                            .title(),
+                        ),
                     ),
                 ),
             )
@@ -1326,7 +1447,9 @@ class PdfAnalysisDialog(QDialog):
     def _value_for_field(self, field: DetectedField) -> str:
         if (field.source or "").startswith("form."):
             selected = self.form_values.get(field.source or "", "")
-            return "X" if selected and selected == field.option_value else ""
+            if field.type in (TemplateFieldType.RADIO, TemplateFieldType.CHECKBOX):
+                return "X" if selected and selected == field.option_value else ""
+            return selected or field.default_value
         return profile_value(self._selected_profile(), field.source, field.label)
 
     def _add_signature(self) -> None:
@@ -1478,6 +1601,8 @@ class PdfAnalysisDialog(QDialog):
                     field.rect.y0,
                     field.rect.x1,
                     field.rect.y1,
+                    field.font_family,
+                    field.font_size,
                 )
             )
         return output
@@ -1603,6 +1728,11 @@ class PdfAnalysisDialog(QDialog):
     def _previous_page(self) -> None:
         if self.current_page > 0:
             self._show_page(self.current_page - 1)
+
+    def _change_page_by_wheel(self, offset: int) -> None:
+        target = self.current_page + offset
+        if 0 <= target < self.analysis.page_count:
+            self._show_page(target)
 
     def _next_page(self) -> None:
         if self.current_page + 1 < self.analysis.page_count:

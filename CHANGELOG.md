@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## [1.0.0-rc.9] – 2026-07-31
+
+### Added
+
+- Direkte Bildvorschau in der Unterschriftenverwaltung.
+- Zweistufige Datenquellenauswahl zwischen Profil und Formular.
+- Bearbeitbare Vorgabewerte, Schriftart und Schriftgröße.
+- Größenänderung von Feldern über den rechten unteren Rahmengriff.
+- Tatsächliche PDF-Ausgabevorschau aus dem Analysefenster.
+- Installierte Templates mit Quell-PDF können erneut bearbeitet werden.
+- Metadatenvorschläge für Schulen sowie Auswahllisten für Gültigkeit,
+  Dokumentart und Zielgruppe.
+
+### Changed
+
+- Das Mausrad wechselt PDF-Seiten; Strg+Mausrad zoomt.
+- Falsche gelernte Zuordnungen können nach Bestätigung überschrieben werden.
+- Formular-Textfelder benötigen keinen Ja/Nein-Auswahlwert.
+- Verteilerlisten werden in einem zusammenhängenden Editor bearbeitet.
+
+### Fixed
+
+- Ungültige E-Mail-Adressen schließen die Verteilerbearbeitung nicht mehr.
+- Schriftstil und Vorgabewert bleiben beim Speichern eines Templates erhalten.
+
 ## [1.0.0-rc.8] – 2026-07-30
 
 ### Added

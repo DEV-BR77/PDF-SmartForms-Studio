@@ -93,6 +93,13 @@ def test_repository_migrates_mobile_away_from_general_phone(tmp_path: Path) -> N
     assert dictionary.match("telefon")[0] == "contact.phone"
 
 
+def test_repository_can_reassign_confirmed_alias(tmp_path: Path) -> None:
+    repository = FieldDictionaryRepository(tmp_path / "dictionary")
+    repository.reassign("Name", "participant.name")
+
+    assert repository.load().match("Name")[0] == "participant.name"
+
+
 def test_unknown_dictionary_schema_is_rejected() -> None:
     with pytest.raises(ValueError):
         FieldDictionary.from_dict({"schema_version": "99", "language": "de", "entries": {}})

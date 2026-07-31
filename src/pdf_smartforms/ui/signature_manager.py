@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -50,8 +52,8 @@ class SignatureManagerDialog(QDialog):
         )
         warning.setWordWrap(True)
         layout.addWidget(warning)
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Name", "Person", "Größe", "Datei-ID"])
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["Name", "Person", "Größe", "Datei-ID", "Vorschau"])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -91,7 +93,40 @@ class SignatureManagerDialog(QDialog):
             )
             for column, value in enumerate(values):
                 self.table.setItem(row, column, QTableWidgetItem(value))
+            preview = QPushButton("Anzeigen")
+            preview.setAccessibleName(f"Vorschau der Unterschrift {asset.name}")
+            preview.clicked.connect(
+                lambda _checked=False, selected=asset: self._preview_asset(selected)
+            )
+            self.table.setCellWidget(row, 4, preview)
         self.table.resizeColumnsToContents()
+
+    def _preview_asset(self, asset: SignatureAsset) -> None:
+        pixmap = QPixmap(str(self.repository.image_path(asset)))
+        if pixmap.isNull():
+            QMessageBox.warning(
+                self, "Vorschau nicht möglich", "Das Unterschriftenbild ist nicht lesbar."
+            )
+            return
+        preview = QDialog(self)
+        preview.setWindowTitle(f"Vorschau · {asset.name}")
+        preview.resize(560, 260)
+        layout = QVBoxLayout(preview)
+        image = QLabel()
+        image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        image.setPixmap(
+            pixmap.scaled(
+                500,
+                170,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        layout.addWidget(image)
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.rejected.connect(preview.reject)
+        layout.addWidget(close)
+        preview.exec()
 
     def _selected_asset(self) -> SignatureAsset | None:
         row = self.table.currentRow()

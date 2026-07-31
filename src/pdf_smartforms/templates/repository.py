@@ -74,6 +74,13 @@ class TemplateRepository:
             target.parent.rmdir()
         return True
 
+    def source_pdf_path(self, template: Template) -> Path | None:
+        """Return the validated locally installed source PDF, if the package contains it."""
+        if not template.source_pdf:
+            return None
+        candidate = self._version_directory(template) / template.source_pdf
+        return candidate if candidate.is_file() else None
+
     def _version_directory(self, template: Template) -> Path:
         errors = template.validate()
         if errors:
